@@ -27,7 +27,13 @@ Create a `.env` file in the root directory (or use environment variables) to con
 TELEGRAM_BOT_TOKEN="your_bot_token"
 TELEGRAM_CHAT_ID="your_chat_id"
 OZBARGAIN_DB_PATH="ozbargain.db" # Optional override
+MIN_HEAT_SCORE=60                # Score threshold for trending alerts
+TRENDING_CHECK_INTERVAL=30       # Minutes between trending checks
+POLL_INTERVAL=5                  # Seconds between live feed polls
 ```
+
+### Self-Healing Feature
+The Live Monitor now includes a self-healing mechanism. If the Playwright browser session crashes or encounters a fatal error (e.g., target closed), the service will automatically log the error and re-initialize a fresh browser session after a short delay (15 seconds), ensuring continuous monitoring.
 
 ### Local Installation
 
