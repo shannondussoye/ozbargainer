@@ -1,0 +1,16 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+venv/
+.env
+
+# Database
+*.db
+
+# OS
+.DS_Store
+
+# Brain / Artifacts (keep local)
+.gemini/
+brain/
