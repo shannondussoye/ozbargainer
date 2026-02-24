@@ -60,9 +60,11 @@ class LiveMonitor:
                                  f"<b>Deal:</b> <a href='{deal_link}'>{deal_data.get('title')}</a>\n" \
                                  f"<b>Price:</b> {deal_data.get('price', 'N/A')}"
                     
-                    self.notifier.send_message(alert_text, priority=True)
-                    self.db.log_alert(deal_id, "priority")
-                    print(f"[LiveMonitor] Sent Alert for tags: {matches}")
+                    if self.notifier.send_message(alert_text, priority=True):
+                        self.db.log_alert(deal_id, "priority")
+                        print(f"[LiveMonitor] Sent Alert for tags: {matches}")
+                    else:
+                        print(f"[LiveMonitor] Failed to send Alert for tags: {matches}")
                 else:
                     print(f"[LiveMonitor] Skip Alert (Already Sent): {matches}")
         except Exception as e:
@@ -105,202 +107,141 @@ class LiveMonitor:
 
     def run(self):
         print("Starting Live Monitor...")
-        with sync_playwright() as p:
-            browser = p.chromium.launch(headless=True) # Can be False to see it
-            page = browser.new_page()
-            
-            print("Navigating to /live...")
-            page.goto("https://www.ozbargain.com.au/live")
-            page.wait_for_selector("tbody#livebody")
-            
-            # Setup Filters: Uncheck Wiki
-            print("Configuring filters...")
+        last_trending_check = datetime.now() - timedelta(minutes=self.trending_check_interval)
+        
+        while True:
+            print("[LiveMonitor] Initializing browser session...")
             try:
-                # Optimized Filter Script: More resilient to DOM depth changes
-                filter_script = """
-                    () => {
-                        function setFilterByText(text, desiredState) {
-                            const labels = Array.from(document.querySelectorAll('label'));
-                            const label = labels.find(l => l.innerText.trim() === text);
-                            if (label) {
-                                const input = label.querySelector('input');
-                                if (input && input.checked !== desiredState) {
-                                    input.click(); // Click the input directly if possible, or the label
+                with sync_playwright() as p:
+                    browser = p.chromium.launch(headless=True)
+                    page = browser.new_page()
+                    
+                    print("[LiveMonitor] Navigating to /live...")
+                    page.goto("https://www.ozbargain.com.au/live")
+                    page.wait_for_selector("tbody#livebody")
+                    
+                    # Setup Filters: Uncheck Wiki
+                    print("[LiveMonitor] Configuring filters...")
+                    filter_script = """
+                        () => {
+                            function setFilterByText(text, desiredState) {
+                                const labels = Array.from(document.querySelectorAll('label'));
+                                const label = labels.find(l => l.innerText.trim() === text);
+                                if (label) {
+                                    const input = label.querySelector('input');
+                                    if (input && input.checked !== desiredState) {
+                                        input.click();
+                                    }
                                 }
                             }
+                            setFilterByText('Wiki', false);
+                            const typeHeader = Array.from(document.querySelectorAll('#filters a'))
+                                                   .find(a => a.innerText.includes('Type'));
+                            if (typeHeader) typeHeader.click();
                         }
-
-                        // 1. Uncheck Wiki
-                        setFilterByText('Wiki', false);
-
-                        // 2. Open Type Dropdown
-                        const typeHeader = Array.from(document.querySelectorAll('#filters a'))
-                                               .find(a => a.innerText.includes('Type'));
-                        if (typeHeader) typeHeader.click();
-                    }
-                """
-                page.evaluate(filter_script)
-                
-                # Wait for dropdown animation
-                page.wait_for_timeout(1000)
-                
-                # 3. Configure Type Options
-                type_script = """
-                    () => {
-                        function setFilterByText(text, desiredState) {
-                            const labels = Array.from(document.querySelectorAll('label'));
-                            const label = labels.find(l => l.innerText.trim() === text);
-                            if (label) {
-                                const input = label.querySelector('input');
-                                if (input && input.checked !== desiredState) {
-                                    input.click();
+                    """
+                    page.evaluate(filter_script)
+                    page.wait_for_timeout(1000)
+                    
+                    type_script = """
+                        () => {
+                            function setFilterByText(text, desiredState) {
+                                const labels = Array.from(document.querySelectorAll('label'));
+                                const label = labels.find(l => l.innerText.trim() === text);
+                                if (label) {
+                                    const input = label.querySelector('input');
+                                    if (input && input.checked !== desiredState) {
+                                        input.click();
+                                    }
                                 }
                             }
+                            setFilterByText('Comp', false);
+                            setFilterByText('Forum', false);
+                            setFilterByText('Deal', true);
                         }
-                        
-                        setFilterByText('Comp', false);
-                        setFilterByText('Forum', false);
-                        setFilterByText('Deal', true);
-                    }
-                """
-                page.evaluate(type_script)
-                page.wait_for_timeout(500)
-                
-                print("Filters configured (Wiki=Off, Type=Deal Only).")
-            except Exception as e:
-                print(f"Error checking filters: {e}")
-
-            print("Listening for updates... (Ctrl+C to stop)")
-            
-            last_trending_check = datetime.now()
-            
-            while True:
-                try:
-                    # --- Trending Check (Configurable interval) ---
-                    if datetime.now() - last_trending_check > timedelta(minutes=self.trending_check_interval):
-                        print("[LiveMonitor] Checking for trending deals...")
-                        last_trending_check = datetime.now()
+                    """
+                    page.evaluate(type_script)
+                    page.wait_for_timeout(500)
+                    
+                    print("[LiveMonitor] Filters configured. Listening for updates...")
+                    
+                    while True:
                         try:
-                            # Fetch deals meeting threshold directly from DB
-                            candidates = self.db.get_trending_deals(hours=24, limit=-1, min_score=self.min_heat_score)
-                            
-                            for deal in candidates:
-                                heat_score = deal.get("heat_score", 0)
-                                deal_id = deal["resolved_id"]
+                            # --- Trending Check ---
+                            if datetime.now() - last_trending_check > timedelta(minutes=self.trending_check_interval):
+                                print("[LiveMonitor] Checking for trending deals...")
+                                last_trending_check = datetime.now()
+                                candidates = self.db.get_trending_deals(hours=24, limit=-1, min_score=self.min_heat_score)
                                 
-                                # Use DB Persistence
-                                if heat_score >= self.min_heat_score and not self.db.has_alerted(deal_id, "trending"):
-                                    # Send Trending Alert
-                                    deal_link = f"https://www.ozbargain.com.au/{deal_id}"
-                                    msg = f"<b>🔥 POPULAR DEAL!</b> (Score: {heat_score})\n\n" \
-                                          f"<a href='{deal_link}'>{deal['title']}</a>\n" \
-                                          f"<b>Price:</b> {deal['price']}\n" \
-                                          f"<b>Votes:</b> {deal['upvotes']} | <b>Comments:</b> {deal['comment_count']}"
+                                for deal in candidates:
+                                    deal_id = deal["resolved_id"]
+                                    if not self.db.has_alerted(deal_id, "trending"):
+                                        deal_link = f"https://www.ozbargain.com.au/{deal_id}"
+                                        msg = f"<b>🔥 POPULAR DEAL!</b> (Score: {deal['heat_score']})\n\n" \
+                                              f"<a href='{deal_link}'>{deal['title']}</a>\n" \
+                                              f"<b>Price:</b> {deal['price']}\n" \
+                                              f"<b>Votes:</b> {deal['upvotes']} | <b>Comments:</b> {deal['comment_count']}"
+                                        
+                                        if self.notifier.send_message(msg, priority=False):
+                                            self.db.log_alert(deal_id, "trending")
+                                            print(f"[LiveMonitor] Sent Trending Alert: {deal['title']}")
+                                        else:
+                                            print(f"[LiveMonitor] Failed to send Trending Alert: {deal['title']}")
+
+                            # --- Deal Stream Check ---
+                            rows = page.locator("tbody#livebody tr").all()
+                            recent_rows = rows[:20]
+                            
+                            for row in recent_rows:
+                                try:
+                                    type_str = row.locator("td:nth-child(5)").text_content().strip()
+                                    if type_str != "Deal":
+                                        continue
+                                        
+                                    subject_link_el = row.locator("td:nth-child(4) a")
+                                    if subject_link_el.count() == 0: continue
+                                    url = subject_link_el.get_attribute("href")
+                                    if url.startswith("/"):
+                                        url = f"https://www.ozbargain.com.au{url}"
                                     
-                                    self.notifier.send_message(msg, priority=False)
-                                    self.db.log_alert(deal_id, "trending")
-                                    print(f"[LiveMonitor] Sent Trending Alert: {deal['title']} (Score: {heat_score})")
-                        except Exception as te:
-                            print(f"[LiveMonitor] Error checking trending: {te}")
+                                    if url in self.seen_rows: continue
+                                    self.seen_rows.add(url)
+                                    
+                                    time_str = row.locator("td:nth-child(1)").text_content().strip()
+                                    timestamp = self.parse_relative_time(time_str).isoformat()
+                                    user_str = row.locator("td:nth-child(2)").text_content().strip()
+                                    
+                                    action_el = row.locator("td:nth-child(3) i")
+                                    action_str = action_el.get_attribute("title") or "Unknown"
+                                    
+                                    event_data = {
+                                        "original_url": url,
+                                        "timestamp": timestamp,
+                                        "time_str": time_str,
+                                        "user": user_str,
+                                        "action": action_str,
+                                        "type": type_str
+                                    }
+                                    
+                                    # Process deal (will handle priority alerts)
+                                    self.process_deal(url, browser=browser, event_data=event_data)
+                                    
+                                except Exception as e:
+                                    if "Target page, context or browser has been closed" in str(e):
+                                        raise e # Trigger outer recovery
+                                    pass
 
-                    # Get recent rows from top
-                    # We only care about new stuff.
-                    # Logic: Get top 5 rows. Process them.
-                    # Since it's a "stream", new stuff appears at top.
-                    
-                    rows = page.locator("tbody#livebody tr").all()
-                    
-                    # Take top 20 to ensure we find deals even if cluttered
-                    recent_rows = rows[:20]
-                    
-                    for row in recent_rows:
-                        # Extract unique signature to avoid spamming the service
-                        # best signature is the specific link to the action item
-                        try:
-                            # Extract columns for Time|User|Action|Subject|Type format
-                            # col 1: Time
-                            time_str = row.locator("td:nth-child(1)").text_content().strip()
-                            timestamp = self.parse_relative_time(time_str).isoformat()
-                            
-                            # col 2: User
-                            user_str = row.locator("td:nth-child(2)").text_content().strip()
-                            
-                            # col 3: Action (Icon title)
-                            action_el = row.locator("td:nth-child(3) i")
-                            action_str = "Unknown"
-                            if action_el.count() > 0:
-                                # Try title attribute first, else guess from class
-                                action_title = action_el.get_attribute("title")
-                                if action_title:
-                                    action_str = action_title
-                                else:
-                                    cls = action_el.get_attribute("class")
-                                    if "fa-file" in cls: action_str = "Post"
-                                    elif "fa-comment" in cls: action_str = "Comment"
-                                    elif "fa-plus" in cls: action_str = "Vote Up"
-                                    elif "fa-minus" in cls: action_str = "Vote Down"
-                            
-                            # col 4: Subject
-                            subject_link_el = row.locator("td:nth-child(4) a")
-                            if subject_link_el.count() == 0:
-                                print("DEBUG: Skip (no link)")
-                                continue
-                            subject_text = subject_link_el.text_content().strip()
-                            url = subject_link_el.get_attribute("href")
-                            
-                            # col 5: Type
-                            type_str = row.locator("td:nth-child(5)").text_content().strip()
-                            
-                            # Software-side filter fallback
-                            if type_str != "Deal":
-                                continue
-
-                            # Construct full URL
-                            if url.startswith("/"):
-                                url = f"https://www.ozbargain.com.au{url}"
-                            
-                            if url in self.seen_rows:
-                                continue
-                                
-                            # It's new to this session
-                            self.seen_rows.add(url)
-                            
-                            # Prepare event data for merging
-                            event_data = {
-                                "original_url": url,
-                                "timestamp": timestamp,
-                                "time_str": time_str,
-                                "user": user_str,
-                                "action": action_str,
-                                "type": type_str
-                            }
-                            
-                            # Process deal
-                            deal_id, resolved_url = self.process_deal(url, browser=browser, event_data=event_data)
-                            
-                            if not resolved_url:
-                                resolved_url = "N/A"
-
-                            # Requested Output Format: Timestamp|TimeStr|User|Action|Subject|Type|URL|ResolvedURL
-                            print(f"{timestamp}|{time_str}|{user_str}|{action_str}|{subject_text}|{type_str}|{url}|{resolved_url}")
-                            
-                            if deal_id:
-                                # Optional: We could suppress this if now redundant, but good for debug
-                                # print(f"      -> Linked Deal ID: {deal_id}")
-                                pass
-                                
-                        except Exception as e:
-                            print(f"DEBUG: Loop Error: {e}")
-                            # Row might be detached if page refreshed too fast
-                            pass
-                            
-                except Exception as e:
-                    print(f"Error in monitor loop: {e}")
-                
-                # Poll interval
-                time.sleep(self.poll_interval)
-                
-            browser.close()
+                        except Exception as loop_e:
+                            if "Target page, context or browser has been closed" in str(loop_e):
+                                raise loop_e
+                            print(f"[LiveMonitor] Loop error: {loop_e}")
+                        
+                        time.sleep(self.poll_interval)
+                        
+            except Exception as e:
+                print(f"[LiveMonitor] Fatal session error: {e}")
+                print("[LiveMonitor] Restarting browser session in 15 seconds...")
+                time.sleep(15)
 
 if __name__ == "__main__":
     monitor = LiveMonitor()

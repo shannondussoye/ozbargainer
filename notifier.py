@@ -48,8 +48,10 @@ class TelegramNotifier:
         try:
             response = requests.post(api_url, json=payload, timeout=10)
             response.raise_for_status()
+            return True
         except Exception as e:
             print(f"[Notifier] Error sending message: {e}")
+            return False
 
 if __name__ == "__main__":
     n = TelegramNotifier()
