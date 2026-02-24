@@ -235,6 +235,26 @@ class StorageManager:
         rows = cursor.fetchall()
         conn.close()
         return [dict(row) for row in rows]
+
+    def resolve_node_id_by_title(self, title: str) -> Optional[str]:
+        """Attempts to find the canonical node ID for a given deal title."""
+        if not title:
+            return None
+        
+        conn = self._get_connection()
+        cursor = conn.cursor()
+        
+        # Try exact match first
+        cursor.execute("SELECT resolved_id FROM live_deals WHERE title = ? AND resolved_id LIKE 'node/%' LIMIT 1", (title,))
+        row = cursor.fetchone()
+        
+        if not row:
+            # Try fuzzy match if exact fails (e.g. title has extra whitespace or suffix)
+            cursor.execute("SELECT resolved_id FROM live_deals WHERE title LIKE ? AND resolved_id LIKE 'node/%' LIMIT 1", (f"%{title}%",))
+            row = cursor.fetchone()
+            
+        conn.close()
+        return row[0] if row else None
         
     # --- Config Methods ---
 

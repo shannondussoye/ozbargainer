@@ -7,7 +7,7 @@ mock_playwright = MagicMock()
 sys.modules['playwright'] = mock_playwright
 sys.modules['playwright.sync_api'] = mock_playwright
 
-from scraper import OzBargainScraper
+from ozbargain.core.scraper import OzBargainScraper
 
 class TestOzBargainScraper(unittest.TestCase):
     def setUp(self):

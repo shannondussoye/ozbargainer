@@ -1,99 +1,125 @@
 # OzBargain Monitor & Scraper
 
-A Python-based toolkit for monitoring live deals on [OzBargain](https://www.ozbargain.com.au), tracking trend velocity, establishing watched tag alerts, and scraping user activity. The system uses a combination of `playwright` for dynamic content parsing (like infinite scrolls and live feeds) and `requests`/`beautifulsoup4` for fast, concurrent fetching.
+A robust Python-based toolkit for monitoring live deals on [OzBargain](https://www.ozbargain.com.au), tracking trend velocity, and automating user activity archiving.
 
-## 🏗 Architecture & Components
+## 🏗 Architecture
 
-The application saves all data to a local SQLite database (`ozbargain.db`) and integrates with Telegram for real-time priority alerts and trending deal notifications.
+The system is organized into a modular Python package (`ozbargain`) designed for scalability and containerization.
 
-### Key Files
-* **`live_monitor.py`**: The main persistent service. It opens a Playwright instance to watch the OzBargain `/live` feed (filtered to Deals), polling every few seconds for new items. Upon detecting a new deal, it scrapes the context, saves it to the DB, checks if it matches any "watched tags", and fires a Telegram alert if it does. It also periodically checks DB snapshots for "trending" deals and alerts when a deal gets popular.
-* **`fetch_user_activity.py`**: A CLI tool that scrapes a particular user's activity profile on OzBargain. It uses a Playwright generator to handle infinite scrolling, while a ThreadPool of concurrent workers quickly fetches the context of each deal they interacted with using requests.
-* **`scraper.py`**: The core scraping logic. It contains standard Playwright abstractions for logging into/navigating OzBargain, a humanized infinite-scroll mechanism, and a fast `requests`-based scraper to extract deal metadata (Title, Price, Tags, Votes, Description, etc.).
-* **`db_manager.py`**: SQLite database manager that tracks `live_deals`, historical `deal_snapshots` (for trending velocity), `user_activity`, and user `watched_tags`. Contains logic to compute "Heat Scores" for trending deals.
-* **`notifier.py`**: A simple Telegram messaging module payload dispatcher.
+```mermaid
+graph TD
+    subgraph "Scraper Package (ozbargain)"
+        M["core/monitor.py (Live Feed)"] --> S["core/scraper.py (Data Extraction)"]
+        M --> DB["db/manager.py (Storage)"]
+        M --> T["notifier/telegram.py (Alerts)"]
+    end
 
+    subgraph "Infrastructure"
+        DB --> SL[(SQLite - ozbargain.db)]
+        M -.-> Docker[Docker Container]
+    end
+
+    subgraph "External Integration"
+        S --> OZ["OzBargain.com.au"]
+        T --> TG["Telegram Bot API"]
+    end
+
+    subgraph "Utilities (scripts/)"
+        CU["cleanup_db.py"] --> DB
+        FU["fetch_user_activity.py"] --> S
+    end
+```
+
+### Key Components
+* **`ozbargain.core.monitor`**: The heartbeat of the system. Watches the `/live` feed using Playwright, detects new events, and orchestrates scraping and alerting.
+* **`ozbargain.core.scraper`**: Handles the heavy lifting of parsing OzBargain. Features include:
+    * **Bot-Wall Resilience**: Specialized logic to handle Cloudflare security challenges.
+    * **Metadata Fallback**: Uses live-row data when direct page scraping is restricted.
+    * **Context Awareness**: Resolves comment links back to their parent deal nodes.
+* **`ozbargain.db.manager`**: Centralized SQLite state management. Tracks snapshots for trending analytics and maintains the alert history.
+* **`ozbargain.notifier.telegram`**: Dispatcher for real-time deal alerts.
+
+---
 
 ## 🚀 Getting Started
 
 ### Prerequisites
 * Python 3.10+
-* [Telegram Bot Token and Chat ID](https://core.telegram.org/bots/tutorial) (Optional, for alerts)
+* Docker (Recommended for production)
 
-### Environment Setup
-
-Create a `.env` file in the root directory (or use environment variables) to configure Telegram:
+### Environment Configuration
+Create a `.env` file in the root:
 ```ini
 TELEGRAM_BOT_TOKEN="your_bot_token"
 TELEGRAM_CHAT_ID="your_chat_id"
-OZBARGAIN_DB_PATH="ozbargain.db" # Optional override
-MIN_HEAT_SCORE=60                # Score threshold for trending alerts
-TRENDING_CHECK_INTERVAL=30       # Minutes between trending checks
-POLL_INTERVAL=5                  # Seconds between live feed polls
+MIN_HEAT_SCORE=60                # Threshold for trending alerts
+TRENDING_CHECK_INTERVAL=30       # Minutes between velocity scans
+POLL_INTERVAL=5                  # Seconds between feed polls
 ```
 
-### Self-Healing Feature
-The Live Monitor now includes a self-healing mechanism. If the Playwright browser session crashes or encounters a fatal error (e.g., target closed), the service will automatically log the error and re-initialize a fresh browser session after a short delay (15 seconds), ensuring continuous monitoring.
+---
 
-### Local Installation
+## 🐳 Docker Deployment (Recommended)
 
-1. Create a virtual environment and install dependencies:
+The easiest way to run the scraper is via Docker. The image includes all necessary browser binaries and timezone configurations.
+
+### 1. Build the Image
+```bash
+docker build -t ozbargain-scraper .
+```
+
+### 2. Run the Live Monitor
+Mount the host database and timezone to ensure persistence and correct timestamps:
+```bash
+docker run -d \
+    --name ozbargain-monitor \
+    --env-file .env \
+    -e TZ=Australia/Sydney \
+    -v /etc/localtime:/etc/localtime:ro \
+    -v $(pwd)/ozbargain.db:/app/ozbargain.db \
+    ozbargain-scraper
+```
+
+### 3. Check Logs
+```bash
+docker logs -f ozbargain-monitor
+```
+
+---
+
+## 🛠 Local Development
+
+### Installation
+1. Install dependencies:
    ```bash
-   python -m venv venv
-   source venv/bin/activate
    pip install -r requirements.txt
-   ```
-2. Install Playwright browser binaries:
-   ```bash
    playwright install chromium
    ```
 
-### Running the Live Monitor
+2. Run the monitor (from the project root):
+   ```bash
+   export PYTHONPATH=$PYTHONPATH:.
+   python3 -m ozbargain.core.monitor
+   ```
 
-To start the real-time deal monitor and alert system:
-```bash
-python live_monitor.py
-```
-*Note: Make sure to populate the `watched_tags` table in `ozbargain.db` if you want targeted keyword alerts!*
+---
 
-### Fetching User Activity
+## 🧹 Maintenance Scripts
 
-To archive a specific user's posts and comments:
-```bash
-python fetch_user_activity.py <username> --limit 100 --workers 10
-```
-Use `--headful` if you want to watch the browser automate the infinite scrolling.
+Useful utilities located in the `scripts/` directory:
 
-## 🐳 Docker Deployment
+* **Fetch User Activity**: Scrape a specific user archive.
+  ```bash
+  python3 -m scripts.fetch_user_activity --username <name>
+  ```
+* **Cleanup Database**: Purge or fix inconsistent records.
+  ```bash
+  python3 -m scripts.cleanup_db
+  ```
 
-A `Dockerfile` is provided based on the official Microsoft Playwright Python image.
+---
 
-Build the image:
-```bash
-docker build -t ozbargain-tools .
-```
-
-### Running the Scraper via Docker
-
-When running the container, you can pass environment variables and mount a volume so your database persists:
-
-**Run user activity fetcher (default command):**
-```bash
-docker run --rm \
-    -v $(pwd)/data:/app/data \
-    ozbargain-tools \
-    python fetch_user_activity.py some_username --limit 50
-```
-
-**Run the live monitor:**
-```bash
-docker run -d \
-    --name ozb-monitor \
-    --env-file .env \
-    -v $(pwd)/data:/app/data \
-    -e OZBARGAIN_DB_PATH=/app/data/ozbargain.db \
-    ozbargain-tools \
-    python live_monitor.py
-```
-
-*Note: Ensure you map a persistent directory (e.g. `./data`) to avoid losing the SQLite database and alert history.*
+## 🛡 Security & Anti-Bot
+OzBargain employs aggressive security verification (Cloudflare Turnstile). This scraper implements a **Hybrid Resolution** strategy: 
+1. If a direct scrape is blocked, it resolves the event using metadata captured from the Live Feed row.
+2. For comments, it automatically looks up the parent deal in the database to ensure data integrity.

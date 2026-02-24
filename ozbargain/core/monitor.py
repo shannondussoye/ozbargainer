@@ -1,9 +1,9 @@
 import os
 import time
 from playwright.sync_api import sync_playwright
-from scraper import OzBargainScraper
-from db_manager import StorageManager
-from notifier import TelegramNotifier
+from .scraper import OzBargainScraper
+from ..db.manager import StorageManager
+from ..notifier.telegram import TelegramNotifier
 from datetime import datetime, timedelta
 from typing import Dict, Optional
 
@@ -35,6 +35,23 @@ class LiveMonitor:
             deal_data.update(event_data)
             
         # Upsert
+        deal_id = deal_data.get("id") or url
+        
+        # --- Metadata & ID Recovery Fallback ---
+        # If we have a generic title but a good one from event_data (live row), restore it
+        rows_title = event_data.get("title") if event_data else None
+        if rows_title and (not deal_data.get("title") or deal_data.get("title") in ["OzBargain", "www.ozbargain.com.au", "Performing security verification"]):
+             deal_data["title"] = rows_title
+             
+        # If deal_id is a comment, try to resolve to parent node via title
+        if deal_id and deal_id.startswith("comment/"):
+             parent_id = self.db.resolve_node_id_by_title(deal_data.get("title"))
+             if parent_id:
+                  print(f"[LiveMonitor] Resolved comment {deal_id} to parent node {parent_id}")
+                  deal_id = parent_id
+                  deal_data["id"] = deal_id
+        
+        # Final Upsert
         deal_id = self.db.upsert_live_deal(deal_data)
         
         # --- Priority Alerts ---
@@ -201,6 +218,8 @@ class LiveMonitor:
                                     subject_link_el = row.locator("td:nth-child(4) a")
                                     if subject_link_el.count() == 0: continue
                                     url = subject_link_el.get_attribute("href")
+                                    title_text = subject_link_el.text_content().strip()
+                                    
                                     if url.startswith("/"):
                                         url = f"https://www.ozbargain.com.au{url}"
                                     
@@ -215,6 +234,7 @@ class LiveMonitor:
                                     action_str = action_el.get_attribute("title") or "Unknown"
                                     
                                     event_data = {
+                                        "title": title_text,
                                         "original_url": url,
                                         "timestamp": timestamp,
                                         "time_str": time_str,
@@ -223,6 +243,13 @@ class LiveMonitor:
                                         "type": type_str
                                     }
                                     
+                                    # Normalize URL: Strip /redir for deals, but KEEP for comments (leads to node)
+                                    if "/node/" in url:
+                                        if url.endswith("/redir"):
+                                            url = url.replace("/redir", "")
+                                        elif "/redir?" in url:
+                                            url = url.replace("/redir?", "?")
+
                                     # Process deal (will handle priority alerts)
                                     self.process_deal(url, browser=browser, event_data=event_data)
                                     

@@ -4,13 +4,12 @@ FROM mcr.microsoft.com/playwright/python:v1.49.0-jammy
 # Set working directory
 WORKDIR /app
 
-# Install Python dependencies
+# Install Python dependencies and tzdata
 COPY requirements.txt .
-RUN pip install --no-cache-dir -r requirements.txt
-
-# Ensure matching browser binaries are installed
-# (In case pip installs a newer version than the base image provides)
-RUN playwright install chromium
+RUN apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install -y tzdata && \
+    pip install --no-cache-dir -r requirements.txt && \
+    playwright install chromium && \
+    rm -rf /var/lib/apt/lists/*
 
 # Copy source code
 COPY . .
@@ -20,6 +19,7 @@ RUN mkdir -p /app/data
 
 # Set environment variables for generic usage
 ENV PYTHONUNBUFFERED=1
+ENV PYTHONPATH=/app
 
-# Default command (can be overridden)
-CMD ["python", "fetch_user_activity.py", "--help"]
+# Default command: Run the live monitor as a module
+CMD ["python3", "-m", "ozbargain.core.monitor"]

@@ -398,13 +398,41 @@ class OzBargainScraper:
                 parts = final_url.split("/node/")[-1].split("#")[0].split("?")[0]
                 deal_id = f"node/{parts}"
             elif "/comment/" in final_url: 
-                parts = final_url.split("/comment/")[-1].split("/")[0]
-                deal_id = f"comment/{parts}"
+                # Attempt to find parent node link on the page
+                # Breadcrumbs or Title link Usually: div.node-full h1 a or h2.title a
+                parent_link = page.locator("h2.title a, div.node-full h1 a, ul.breadcrumb a").first
+                if parent_link.count() > 0:
+                    parent_url = parent_link.get_attribute("href")
+                    if "/node/" in parent_url:
+                        node_id = parent_url.split("/node/")[-1].split("?")[0].split("#")[0]
+                        deal_id = f"node/{node_id}"
+                        # Also grab title if missing or noisy
+                        if not data.get("title") or data.get("title") in ["OzBargain", "www.ozbargain.com.au", "Performing security verification"]:
+                            data["title"] = parent_link.text_content().strip()
+                
+                # Fallback to comment ID if node not found
+                if not deal_id:
+                    parts = final_url.split("/comment/")[-1].split("/")[0]
+                    deal_id = f"comment/{parts}"
             else:
                 deal_id = final_url
             
             data["id"] = deal_id
             data["url"] = final_url 
+
+            # Handle External Redirects (Non-OzBargain)
+            if "ozbargain.com.au" not in final_url:
+                try:
+                    og_title = page.locator('meta[property="og:title"]').get_attribute("content")
+                    if og_title:
+                        data["title"] = og_title
+                    else:
+                        data["title"] = page.title().split(" - ")[0]
+                    # Tag as external
+                    data["tags"] = ["External"]
+                except:
+                    data["title"] = f"External: {final_url}"
+                return data
 
             # Handle Deep Linked Comment
             target_comment_id = None
@@ -429,8 +457,16 @@ class OzBargainScraper:
             # Expired Status (New)
             data["is_expired"] = False
             # Check for "expired" span within the main node container
-            if page.locator("div.node").first.locator("span:has-text('expired')").count() > 0:
+            node_el = page.locator("div.node").first
+            if node_el.count() > 0 and node_el.locator("span:has-text('expired')").count() > 0:
                 data["is_expired"] = True
+            
+            # Post-Extraction Cleanup: Title Noise
+            if data.get("title") in ["OzBargain", "www.ozbargain.com.au"]:
+                 # Attempt to extract from h2 if h1 was generic
+                 h2_el = page.locator("h2").first
+                 if h2_el.count() > 0:
+                     data["title"] = h2_el.text_content().strip()
             
             # --- New Fields: Posted Date & Domain ---
             submitted_loc = page.locator("div.submitted")

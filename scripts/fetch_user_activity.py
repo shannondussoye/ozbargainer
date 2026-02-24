@@ -2,8 +2,8 @@ import argparse
 import time
 import concurrent.futures
 from typing import Dict
-from scraper import OzBargainScraper
-from db_manager import StorageManager
+from ozbargain.core.scraper import OzBargainScraper
+from ozbargain.db.manager import StorageManager
 
 def process_item(item: Dict, username: str):
     """
