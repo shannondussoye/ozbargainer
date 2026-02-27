@@ -145,7 +145,26 @@ class StorageManager:
             
         now_ts = datetime.now()
         
-        # 1. Upsert Current State
+        # 1. Fetch current state to check for "Data Integrity Guard"
+        cursor.execute('SELECT upvotes, comment_count FROM live_deals WHERE resolved_id = ?', (resolved_id,))
+        existing = cursor.fetchone()
+        
+        upvotes = data.get("upvotes", 0)
+        comment_count = data.get("comment_count", 0)
+        
+        # Data Integrity Guard: 
+        # If scraper hits a bot-wall, it might return 0 upvotes/comments.
+        # If we already have higher numbers, keep them unless we explicitly want to "reset"
+        if existing:
+            orig_upvotes, orig_comments = existing
+            if upvotes == 0 and orig_upvotes > 0:
+                # print(f"[DB] Preserving upvotes ({orig_upvotes}) for {resolved_id} (Incoming was 0)")
+                upvotes = orig_upvotes
+            if comment_count == 0 and orig_comments > 0:
+                # print(f"[DB] Preserving comment_count ({orig_comments}) for {resolved_id} (Incoming was 0)")
+                comment_count = orig_comments
+
+        # 2. Upsert Current State
         cursor.execute('''
             INSERT OR REPLACE INTO live_deals (
                 resolved_id, resolved_url, original_url, 
@@ -163,9 +182,9 @@ class StorageManager:
             data.get("description"),
             data.get("coupon_code"),
             tags_str,
-            data.get("upvotes", 0),
+            upvotes,
             data.get("downvotes", 0),
-            data.get("comment_count", 0),
+            comment_count,
             now_ts,
             data.get("time_str"),
             data.get("user"),
@@ -177,7 +196,7 @@ class StorageManager:
             source
         ))
         
-        # 2. Add History Snapshot (For Trending Velocity)
+        # 3. Add History Snapshot (For Trending Velocity)
         # We assume data["timestamp"] is the event time, but for snapshots we usually want "recorded at" time
         # Using current system time for the snapshot timestamp makes velocity calcs reliable relative to "now"
         cursor.execute('''
@@ -186,8 +205,8 @@ class StorageManager:
         ''', (
             resolved_id,
             now_ts,
-            data.get("upvotes", 0),
-            data.get("comment_count", 0)
+            upvotes,
+            comment_count
         ))
         
         conn.commit()

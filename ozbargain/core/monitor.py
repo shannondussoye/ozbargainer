@@ -10,7 +10,8 @@ from typing import Dict, Optional
 class LiveMonitor:
     def __init__(self):
         self.db = StorageManager()
-        self.scraper = OzBargainScraper(headless=True)
+        self.cdp_url = os.getenv("CHROME_CDP_URL")
+        self.scraper = OzBargainScraper(headless=True, cdp_url=self.cdp_url)
         self.notifier = TelegramNotifier()
         self.seen_rows = set() # Cache to avoid re-processing simple rows in same session
         

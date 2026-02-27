@@ -1,6 +1,6 @@
-
 import re
 import requests
+import os
 from datetime import datetime
 import random
 import time
@@ -8,8 +8,9 @@ from typing import List, Dict, Optional
 from playwright.sync_api import sync_playwright, Page, ElementHandle
 
 class OzBargainScraper:
-    def __init__(self, headless: bool = True):
+    def __init__(self, headless: bool = True, cdp_url: str = None):
         self.headless = headless
+        self.cdp_url = cdp_url or os.getenv("CHROME_CDP_URL")
         self.base_url = "https://www.ozbargain.com.au"
 
 
@@ -558,8 +559,7 @@ class OzBargainScraper:
     def scrape_deal_page(self, url: str, browser=None) -> Dict:
         """
         Scrapes details from a specific deal or comment page.
-        If browser is provided, uses it to open a new page.
-        Otherwise, launches a new browser instance.
+        Supports connecting via CDP if self.cdp_url is set.
         """
         if browser:
             page = browser.new_page()
@@ -568,8 +568,22 @@ class OzBargainScraper:
                 return self._extract_deal_data(page, url)
             finally:
                 page.close()
-        else:
-            with sync_playwright() as p:
+        
+        with sync_playwright() as p:
+            if self.cdp_url:
+                print(f"[Scraper] Connecting to Chrome via CDP: {self.cdp_url}")
+                try:
+                    browser = p.chromium.connect_over_cdp(self.cdp_url)
+                    # Use a context to ensure we don't interfere with main session tabs if possible
+                    # but usually connect_over_cdp gives us the whole browser.
+                    page = browser.new_page()
+                    page.goto(url)
+                    result = self._extract_deal_data(page, url)
+                    browser.close()
+                    return result
+                except Exception as e:
+                    return {"error": f"CDP Connection failed: {str(e)}", "url": url}
+            else:
                 browser = p.chromium.launch(headless=self.headless)
                 page = browser.new_page()
                 page.goto(url)

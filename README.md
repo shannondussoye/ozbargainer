@@ -61,16 +61,19 @@ POLL_INTERVAL=5                  # Seconds between feed polls
 
 ## 🐳 Docker Deployment (Recommended)
 
-The easiest way to run the scraper is via Docker. The image includes all necessary browser binaries and timezone configurations.
+### Hybrid Bridge (Stealth Mode)
+To bypass Cloudflare bot detection, use the `manage.sh` orchestrator. This runs a real Chrome instance on the host and connects via CDP.
 
-### 1. Build the Image
 ```bash
-docker build -t ozbargain-scraper .
+# Start host browser and docker monitor
+./manage.sh start
 ```
 
-### 2. Run the Live Monitor
-Mount the host database and timezone to ensure persistence and correct timestamps:
+### Standard Deployment
+Alternatively, build and run the container manually:
 ```bash
+docker build -t ozbargain-scraper .
+
 docker run -d \
     --name ozbargain-monitor \
     --env-file .env \
