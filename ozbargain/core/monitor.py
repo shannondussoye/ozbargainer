@@ -14,11 +14,13 @@ class LiveMonitor:
         self.scraper = OzBargainScraper(headless=True, cdp_url=self.cdp_url)
         self.notifier = TelegramNotifier()
         self.seen_rows = set() # Cache to avoid re-processing simple rows in same session
+        self.last_scraped_times = {} # url -> datetime
         
         # Configuration from Environment
         self.min_heat_score = int(os.getenv("MIN_HEAT_SCORE", 60))
         self.trending_check_interval = int(os.getenv("TRENDING_CHECK_INTERVAL", 30)) # Minutes
         self.poll_interval = int(os.getenv("POLL_INTERVAL", 5)) # Seconds
+        self.scrape_cooldown = int(os.getenv("SCRAPE_COOLDOWN_SECONDS", 120)) # 2 mins
 
     def process_deal(self, url: str, browser=None, event_data: Dict = None) -> (Optional[str], Optional[str]):
         """
@@ -254,6 +256,15 @@ class LiveMonitor:
                                         elif "/redir?" in url:
                                             url = url.replace("/redir?", "?")
 
+                                    # --- Rate Limiting / Cooldown ---
+                                    now_time = datetime.now()
+                                    last_scraped = self.last_scraped_times.get(url)
+                                    
+                                    if last_scraped and (now_time - last_scraped).total_seconds() < self.scrape_cooldown:
+                                        continue # Skip re-scraping if we just did it recently
+                                        
+                                    self.last_scraped_times[url] = now_time
+
                                     # Process deal (will handle priority alerts)
                                     self.process_deal(url, browser=browser, event_data=event_data)
                                     
@@ -262,6 +273,12 @@ class LiveMonitor:
                                         raise e # Trigger outer recovery
                                     pass
 
+                            # --- Housekeeping ---
+                            # Prevent last_scraped_times from growing indefinitely
+                            if len(self.last_scraped_times) > 1000:
+                                cutoff = datetime.now() - timedelta(hours=1)
+                                self.last_scraped_times = {k: v for k, v in self.last_scraped_times.items() if v > cutoff}
+                                
                         except Exception as loop_e:
                             if "Target page, context or browser has been closed" in str(loop_e):
                                 raise loop_e
