@@ -224,15 +224,18 @@ class LiveMonitor:
                                     if url.startswith("/"):
                                         url = f"https://www.ozbargain.com.au{url}"
                                     
-                                    if url in self.seen_rows: continue
-                                    self.seen_rows.add(url)
-                                    
                                     time_str = row.locator("td:nth-child(1)").text_content().strip()
-                                    timestamp = self.parse_relative_time(time_str).isoformat()
                                     user_str = row.locator("td:nth-child(2)").text_content().strip()
-                                    
                                     action_el = row.locator("td:nth-child(3) i")
                                     action_str = action_el.get_attribute("title") or "Unknown"
+                                    
+                                    # Track unique /live rows by composite key (not just URL)
+                                    # This allows re-scraping a deal when new vote/comment events arrive
+                                    row_key = f"{time_str}|{user_str}|{action_str}|{url}"
+                                    if row_key in self.seen_rows: continue
+                                    self.seen_rows.add(row_key)
+                                    
+                                    timestamp = self.parse_relative_time(time_str).isoformat()
                                     
                                     event_data = {
                                         "title": title_text,

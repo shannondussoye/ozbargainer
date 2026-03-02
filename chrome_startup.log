@@ -1,0 +1,6 @@
+libva error: /usr/lib/x86_64-linux-gnu/dri/iHD_drv_video.so init failed
+
+DevTools listening on ws://127.0.0.1:9224/devtools/browser/a43c2978-b2c4-46c5-ac93-c827d4a897c6
+Created TensorFlow Lite XNNPACK delegate for CPU.
+[4189268:4189411:0302/210233.944834:ERROR:google_apis/gcm/engine/registration_request.cc:290] Registration response error message: DEPRECATED_ENDPOINT
+[4189268:4189411:0302/210302.198688:ERROR:google_apis/gcm/engine/registration_request.cc:290] Registration response error message: DEPRECATED_ENDPOINT
