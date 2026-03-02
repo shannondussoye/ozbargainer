@@ -32,12 +32,22 @@ graph TD
 
 ### Key Components
 * **`ozbargain.core.monitor`**: The heartbeat of the system. Watches the `/live` feed using Playwright, detects new events, and orchestrates scraping and alerting.
+    * **Real-Time Score Tracking**: Processes individual `Vote Up` and `New comment` events from the live feed to trigger re-scrapes, ensuring database heat scores precisely match the live website.
+    * **Scrape Rate Limiting**: Employs a smart 2-minute cooldown per URL to prevent aggressive re-scraping during viral deal spikes, effectively avoiding Cloudflare bot-wall blocks.
 * **`ozbargain.core.scraper`**: Handles the heavy lifting of parsing OzBargain. Features include:
     * **Bot-Wall Resilience**: Specialized logic to handle Cloudflare security challenges.
     * **Metadata Fallback**: Uses live-row data when direct page scraping is restricted.
     * **Context Awareness**: Resolves comment links back to their parent deal nodes.
-* **`ozbargain.db.manager`**: Centralized SQLite state management. Tracks snapshots for trending analytics and maintains the alert history.
+* **`ozbargain.db.manager`**: Centralized SQLite state management. Features a **Data Integrity Guard** to prevent Cloudflare blocks from overwriting high popularity scores with zeros. Tracks snapshots for trending analytics and maintains the alert history.
 * **`ozbargain.notifier.telegram`**: Dispatcher for real-time deal alerts.
+
+---
+
+## 🤖 OzBargain Data Agent
+The project includes an AI "Data Agent" skill located at `.agents/skills/ozbargain_data_agent.md`. You can ask this AI agent to:
+* **"Give me a health check"**: Returns a report on deals tracked, alerts sent, active/expired ratios, and Data Integrity Guard hits.
+* **"Why didn't node/12345 alert?"**: Audits a specific deal, checking its heat score, expiry status, and snapshot trajectory against business rules.
+* **"What are the top trending deals?"**: Lists the hottest active deals currently in the database.
 
 ---
 
