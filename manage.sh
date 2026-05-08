@@ -40,7 +40,7 @@ function stop_chrome() {
 }
 
 function run_monitor() {
-    echo "[Manage] Starting Docker container ($CONTAINER_NAME)..."
+    echo "[Manage] Starting Docker container ($CONTAINER_NAME) with resource limits..."
     
     # Stop existing container if any
     docker stop "$CONTAINER_NAME" > /dev/null 2>&1
@@ -49,6 +49,8 @@ function run_monitor() {
     docker run -d \
         --name "$CONTAINER_NAME" \
         --network host \
+        --memory 768m \
+        --cpus 0.5 \
         --env-file .env \
         -e CHROME_CDP_URL="http://localhost:$PORT" \
         -e TZ=Australia/Sydney \

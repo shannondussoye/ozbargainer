@@ -133,12 +133,22 @@ class LiveMonitor:
             print("[LiveMonitor] Initializing browser session...")
             try:
                 with sync_playwright() as p:
-                    browser = p.chromium.launch(headless=True)
+                    if self.cdp_url:
+                        print(f"[LiveMonitor] Connecting to Chrome via CDP: {self.cdp_url}")
+                        try:
+                            browser = p.chromium.connect_over_cdp(self.cdp_url)
+                        except Exception as cdp_e:
+                            print(f"[LiveMonitor] CDP Connection failed: {cdp_e}. Falling back to local browser.")
+                            browser = p.chromium.launch(headless=True)
+                    else:
+                        print("[LiveMonitor] Launching local browser...")
+                        browser = p.chromium.launch(headless=True)
+                    
                     page = browser.new_page()
                     
                     print("[LiveMonitor] Navigating to /live...")
-                    page.goto("https://www.ozbargain.com.au/live")
-                    page.wait_for_selector("tbody#livebody")
+                    page.goto("https://www.ozbargain.com.au/live", timeout=60000)
+                    page.wait_for_selector("tbody#livebody", timeout=30000)
                     
                     # Setup Filters: Uncheck Wiki
                     print("[LiveMonitor] Configuring filters...")
@@ -185,11 +195,19 @@ class LiveMonitor:
                     
                     print("[LiveMonitor] Filters configured. Listening for updates...")
                     
+                    last_success_time = datetime.now()
+                    session_start_time = datetime.now()
+                    
                     while True:
+                        # Periodic session refresh (every 4 hours)
+                        if datetime.now() - session_start_time > timedelta(hours=4):
+                            print("[LiveMonitor] Periodic session refresh (4h limit reached).")
+                            break
+
                         try:
                             # --- Trending Check ---
                             if datetime.now() - last_trending_check > timedelta(minutes=self.trending_check_interval):
-                                print("[LiveMonitor] Checking for trending deals...")
+                                print("[LiveMonitor] Performing scheduled trending deals check...")
                                 last_trending_check = datetime.now()
                                 candidates = self.db.get_trending_deals(hours=24, limit=-1, min_score=self.min_heat_score)
                                 
@@ -210,8 +228,15 @@ class LiveMonitor:
 
                             # --- Deal Stream Check ---
                             rows = page.locator("tbody#livebody tr").all()
-                            recent_rows = rows[:20]
                             
+                            # Stale Session Detection
+                            if rows:
+                                last_success_time = datetime.now()
+                            elif datetime.now() - last_success_time > timedelta(minutes=10):
+                                print("[LiveMonitor] No rows seen for 10 minutes. Session may be stale/blocked. Restarting...")
+                                break
+
+                            recent_rows = rows[:20]
                             for row in recent_rows:
                                 try:
                                     type_str = row.locator("td:nth-child(5)").text_content().strip()
@@ -231,8 +256,7 @@ class LiveMonitor:
                                     action_el = row.locator("td:nth-child(3) i")
                                     action_str = action_el.get_attribute("title") or "Unknown"
                                     
-                                    # Track unique /live rows by composite key (not just URL)
-                                    # This allows re-scraping a deal when new vote/comment events arrive
+                                    # Track unique /live rows by composite key
                                     row_key = f"{time_str}|{user_str}|{action_str}|{url}"
                                     if row_key in self.seen_rows: continue
                                     self.seen_rows.add(row_key)
@@ -249,7 +273,6 @@ class LiveMonitor:
                                         "type": type_str
                                     }
                                     
-                                    # Normalize URL: Strip /redir for deals, but KEEP for comments (leads to node)
                                     if "/node/" in url:
                                         if url.endswith("/redir"):
                                             url = url.replace("/redir", "")
@@ -261,20 +284,18 @@ class LiveMonitor:
                                     last_scraped = self.last_scraped_times.get(url)
                                     
                                     if last_scraped and (now_time - last_scraped).total_seconds() < self.scrape_cooldown:
-                                        continue # Skip re-scraping if we just did it recently
+                                        continue 
                                         
                                     self.last_scraped_times[url] = now_time
-
-                                    # Process deal (will handle priority alerts)
                                     self.process_deal(url, browser=browser, event_data=event_data)
                                     
                                 except Exception as e:
                                     if "Target page, context or browser has been closed" in str(e):
-                                        raise e # Trigger outer recovery
+                                        raise e 
+                                    print(f"[LiveMonitor] Row processing error: {e}")
                                     pass
 
                             # --- Housekeeping ---
-                            # Prevent last_scraped_times from growing indefinitely
                             if len(self.last_scraped_times) > 1000:
                                 cutoff = datetime.now() - timedelta(hours=1)
                                 self.last_scraped_times = {k: v for k, v in self.last_scraped_times.items() if v > cutoff}
@@ -282,9 +303,11 @@ class LiveMonitor:
                         except Exception as loop_e:
                             if "Target page, context or browser has been closed" in str(loop_e):
                                 raise loop_e
-                            print(f"[LiveMonitor] Loop error: {loop_e}")
+                            print(f"[LiveMonitor] Inner loop error: {loop_e}")
                         
                         time.sleep(self.poll_interval)
+                    
+                    browser.close()
                         
             except Exception as e:
                 print(f"[LiveMonitor] Fatal session error: {e}")
@@ -294,3 +317,4 @@ class LiveMonitor:
 if __name__ == "__main__":
     monitor = LiveMonitor()
     monitor.run()
+
