@@ -31,9 +31,13 @@ graph TD
 ```
 
 ### Key Components
-* **`ozbargain.core.monitor`**: The heartbeat of the system. Watches the `/live` feed using Playwright, detects new events, and orchestrates scraping and alerting.
-    * **Real-Time Score Tracking**: Processes individual `Vote Up` and `New comment` events from the live feed to trigger re-scrapes, ensuring database heat scores precisely match the live website.
-    * **Scrape Rate Limiting**: Employs a smart 2-minute cooldown per URL to prevent aggressive re-scraping during viral deal spikes, effectively avoiding Cloudflare bot-wall blocks.
+* **`ozbargain.core.monitor`**: The heartbeat of the system. Watches the `/live` feed, detects new events, and orchestrates scraping and alerting.
+    * **Native CDP Support**: Connects directly to a host Chrome instance via Chrome DevTools Protocol (CDP) for high performance and better bot-wall resilience.
+    * **Stale Session Detection**: Automatically detects when the `/live` feed becomes unresponsive or empty for more than 10 minutes and forces a session restart.
+    * **Periodic Session Refresh**: Automatically refreshes the browser environment every 4 hours to prevent memory leaks and maintain long-term stability.
+    * **Real-Time Score Tracking**: Processes individual `Vote Up` and `New comment` events from the live feed to trigger re-scrapes.
+    * **Scrape Rate Limiting**: Employs a smart 2-minute cooldown per URL to avoid Cloudflare bot-wall blocks.
+
 * **`ozbargain.core.scraper`**: Handles the heavy lifting of parsing OzBargain. Features include:
     * **Bot-Wall Resilience**: Specialized logic to handle Cloudflare security challenges.
     * **Metadata Fallback**: Uses live-row data when direct page scraping is restricted.
@@ -72,7 +76,8 @@ POLL_INTERVAL=5                  # Seconds between feed polls
 ## 🐳 Docker Deployment (Recommended)
 
 ### Hybrid Bridge (Stealth Mode)
-To bypass Cloudflare bot detection, use the `manage.sh` orchestrator. This runs a real Chrome instance on the host and connects via CDP.
+To bypass Cloudflare bot detection, use the `manage.sh` orchestrator. This runs a real Chrome instance on the host and the monitor connects via CDP automatically.
+
 
 ```bash
 # Start host browser and docker monitor
@@ -86,11 +91,15 @@ docker build -t ozbargain-scraper .
 
 docker run -d \
     --name ozbargain-monitor \
+    --network host \
+    --memory 768m \
+    --cpus 0.5 \
     --env-file .env \
     -e TZ=Australia/Sydney \
     -v /etc/localtime:/etc/localtime:ro \
     -v $(pwd)/ozbargain.db:/app/ozbargain.db \
     ozbargain-scraper
+
 ```
 
 ### 3. Check Logs
