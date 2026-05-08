@@ -32,9 +32,12 @@ graph TD
 
 ### Key Components
 * **`ozbargain.core.monitor`**: The heartbeat of the system. Watches the `/live` feed, detects new events, and orchestrates scraping and alerting.
+    * **Smart Cooldown**: Consolidates re-scrapes by Node ID and Deal Title. Prevents redundant scrapes when multiple comments or votes arrive for the same deal within a 2-minute window.
+    * **Timeout Optimization**: Uses a aggressive 15-second timeout for individual deal scrapes, ensuring the live feed remains responsive even during OzBargain slowness or bot-wall challenges.
     * **Native CDP Support**: Connects directly to a host Chrome instance via Chrome DevTools Protocol (CDP) for high performance and better bot-wall resilience.
     * **Stale Session Detection**: Automatically detects when the `/live` feed becomes unresponsive or empty for more than 10 minutes and forces a session restart.
     * **Periodic Session Refresh**: Automatically refreshes the browser environment every 4 hours to prevent memory leaks and maintain long-term stability.
+
     * **Real-Time Score Tracking**: Processes individual `Vote Up` and `New comment` events from the live feed to trigger re-scrapes.
     * **Scrape Rate Limiting**: Employs a smart 2-minute cooldown per URL to avoid Cloudflare bot-wall blocks.
 
@@ -76,7 +79,8 @@ POLL_INTERVAL=5                  # Seconds between feed polls
 ## 🐳 Docker Deployment (Recommended)
 
 ### Hybrid Bridge (Stealth Mode)
-To bypass Cloudflare bot detection, use the `manage.sh` orchestrator. This runs a real Chrome instance on the host and the monitor connects via CDP automatically.
+To bypass Cloudflare bot detection, use the `manage.sh` orchestrator. This runs a real Chrome instance on the host and the monitor connects via CDP automatically. Includes **Smart Cooldown** to consolidate scrapes and minimize detection.
+
 
 
 ```bash
