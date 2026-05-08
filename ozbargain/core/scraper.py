@@ -556,7 +556,7 @@ class OzBargainScraper:
             
         return data
 
-    def scrape_deal_page(self, url: str, browser=None) -> Dict:
+    def scrape_deal_page(self, url: str, browser=None, timeout: int = 30000) -> Dict:
         """
         Scrapes details from a specific deal or comment page.
         Supports connecting via CDP if self.cdp_url is set.
@@ -564,7 +564,7 @@ class OzBargainScraper:
         if browser:
             page = browser.new_page()
             try:
-                page.goto(url)
+                page.goto(url, timeout=timeout)
                 return self._extract_deal_data(page, url)
             finally:
                 page.close()
@@ -574,10 +574,8 @@ class OzBargainScraper:
                 print(f"[Scraper] Connecting to Chrome via CDP: {self.cdp_url}")
                 try:
                     browser = p.chromium.connect_over_cdp(self.cdp_url)
-                    # Use a context to ensure we don't interfere with main session tabs if possible
-                    # but usually connect_over_cdp gives us the whole browser.
                     page = browser.new_page()
-                    page.goto(url)
+                    page.goto(url, timeout=timeout)
                     result = self._extract_deal_data(page, url)
                     browser.close()
                     return result
@@ -586,12 +584,13 @@ class OzBargainScraper:
             else:
                 browser = p.chromium.launch(headless=self.headless)
                 page = browser.new_page()
-                page.goto(url)
+                page.goto(url, timeout=timeout)
                 
                 result = self._extract_deal_data(page, url)
                 
                 browser.close()
                 return result
+
 
 if __name__ == "__main__":
     # Internal simple test

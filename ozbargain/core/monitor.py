@@ -5,6 +5,8 @@ from .scraper import OzBargainScraper
 from ..db.manager import StorageManager
 from ..notifier.telegram import TelegramNotifier
 from datetime import datetime, timedelta
+import re
+import random
 from typing import Dict, Optional
 
 class LiveMonitor:
@@ -22,12 +24,12 @@ class LiveMonitor:
         self.poll_interval = int(os.getenv("POLL_INTERVAL", 5)) # Seconds
         self.scrape_cooldown = int(os.getenv("SCRAPE_COOLDOWN_SECONDS", 120)) # 2 mins
 
-    def process_deal(self, url: str, browser=None, event_data: Dict = None) -> (Optional[str], Optional[str]):
+    def process_deal(self, url: str, browser=None, event_data: Dict = None, timeout: int = 30000) -> (Optional[str], Optional[str]):
         """
         Processes a deal URL: Scrape -> Merge -> Upsert
         """
         # Scrape
-        deal_data = self.scraper.scrape_deal_page(url, browser=browser)
+        deal_data = self.scraper.scrape_deal_page(url, browser=browser, timeout=timeout)
         
         if "error" in deal_data:
             print(f"[LiveMonitor] Error scraping {url}: {deal_data['error']}")
@@ -281,13 +283,28 @@ class LiveMonitor:
 
                                     # --- Rate Limiting / Cooldown ---
                                     now_time = datetime.now()
-                                    last_scraped = self.last_scraped_times.get(url)
+                                    # Smart Cooldown: Use Node ID or Title to prevent re-scraping same deal via different events
+                                    cooldown_key = url
+                                    if "/node/" in url:
+                                        node_match = re.search(r'node/(\d+)', url)
+                                        if node_match:
+                                            cooldown_key = f"node/{node_match.group(1)}"
+                                    elif "/comment/" in url:
+                                        # For comments, use the title as a grouping key
+                                        # This prevents multiple comments on the same deal from triggering multiple scrapes
+                                        cooldown_key = f"title/{title_text[:50]}"
+                                    
+                                    last_scraped = self.last_scraped_times.get(cooldown_key)
                                     
                                     if last_scraped and (now_time - last_scraped).total_seconds() < self.scrape_cooldown:
+                                        # Only log skip if it's a node/title ID or if we haven't logged it too much
+                                        if random.random() < 0.1: # 10% chance to log skip to avoid spam
+                                            print(f"[LiveMonitor] Skip re-scrape (Cooldown): {cooldown_key}")
                                         continue 
                                         
-                                    self.last_scraped_times[url] = now_time
-                                    self.process_deal(url, browser=browser, event_data=event_data)
+                                    self.last_scraped_times[cooldown_key] = now_time
+                                    self.process_deal(url, browser=browser, event_data=event_data, timeout=15000)
+
                                     
                                 except Exception as e:
                                     if "Target page, context or browser has been closed" in str(e):
