@@ -13,3 +13,8 @@ services:
     volumes:
       - /etc/localtime:/etc/localtime:ro
       - ./ozbargain.db:/app/ozbargain.db
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "50m"
+        max-file: "3"

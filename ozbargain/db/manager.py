@@ -3,6 +3,9 @@ import json
 import os
 from datetime import datetime
 from typing import Dict, List, Optional
+from ..utils.logger import setup_logger
+
+logger = setup_logger("db_manager")
 
 class StorageManager:
     def __init__(self, db_path: str = None):
@@ -166,10 +169,10 @@ class StorageManager:
         if existing:
             orig_upvotes, orig_comments = existing
             if upvotes == 0 and orig_upvotes > 0:
-                # print(f"[DB] Preserving upvotes ({orig_upvotes}) for {resolved_id} (Incoming was 0)")
+                logger.info("Preserving upvotes (%d) for %s (Incoming was 0)", orig_upvotes, resolved_id)
                 upvotes = orig_upvotes
             if comment_count == 0 and orig_comments > 0:
-                # print(f"[DB] Preserving comment_count ({orig_comments}) for {resolved_id} (Incoming was 0)")
+                logger.info("Preserving comment_count (%d) for %s (Incoming was 0)", orig_comments, resolved_id)
                 comment_count = orig_comments
 
         # 2. Upsert Current State
@@ -232,7 +235,7 @@ class StorageManager:
         
         conn.commit()
         conn.close()
-        # print(f"[DB] Cleaned up {deleted} old snapshots.")
+        logger.info("Cleaned up %d old snapshots.", deleted)
 
     def get_trending_deals(self, hours: int = 24, limit: int = -1, min_score: int = 0) -> List[Dict]:
         """
@@ -293,7 +296,7 @@ class StorageManager:
             cursor.execute("INSERT OR IGNORE INTO watched_tags (tag, is_active) VALUES (?, 1)", (tag,))
             conn.commit()
         except Exception as e:
-            print(f"[DB] Error adding tag {tag}: {e}")
+            logger.error("Error adding tag %s: %s", tag, e)
         finally:
             conn.close()
 
@@ -336,7 +339,7 @@ class StorageManager:
             )
             conn.commit()
         except Exception as e:
-            print(f"[DB] Error logging alert: {e}")
+            logger.error("Error logging alert for %s: %s", deal_id, e)
         finally:
             conn.close()
 
@@ -353,6 +356,6 @@ class StorageManager:
             ''', (user_id, deal_id, activity_ref, content, activity_type, datetime.now()))
             conn.commit()
         except Exception as e:
-            print(f"[DB] Error logging user activity: {e}")
+            logger.error("Error logging user activity for %s: %s", user_id, e)
         finally:
             conn.close()

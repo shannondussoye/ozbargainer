@@ -6,6 +6,9 @@ import random
 import time
 from typing import List, Dict, Optional
 from playwright.sync_api import sync_playwright, Page, ElementHandle
+from ..utils.logger import setup_logger
+
+logger = setup_logger("scraper")
 
 class OzBargainScraper:
     def __init__(self, headless: bool = True, cdp_url: str = None):
@@ -32,12 +35,12 @@ class OzBargainScraper:
             browser = p.chromium.launch(headless=self.headless)
             page = browser.new_page()
             
-            print(f"[Scraper] Loading profile: {base_user_url}")
+            logger.info("Loading profile: %s", base_user_url)
             try:
                 page.goto(base_user_url, timeout=60000)
                 page.wait_for_selector("div.activities", timeout=15000)
             except Exception as e:
-                print(f"[Scraper] Error loading profile: {e}")
+                logger.error("Error loading profile: %s", e)
                 browser.close()
                 return
 
@@ -102,13 +105,13 @@ class OzBargainScraper:
                     
                     # Periodic Breather (every ~300 items)
                     if count > 0 and (count // 300) > ((count - 10) // 300):
-                         print(f"[Scraper] Taking a breather at ~{count} items...")
+                         logger.info("Taking a breather at ~%d items...", count)
                          time.sleep(random.uniform(8.0, 15.0))
                     
                     new_height = page.evaluate("document.body.scrollHeight")
                     if new_height == last_height:
                         retries += 1
-                        print(f"[Scraper] No new items (Retry {retries}/10)...")
+                        logger.warning("No new items (Retry %d/10)...", retries)
                         
                         if retries > 3:
                              # Aggressive Jiggle
@@ -121,7 +124,7 @@ class OzBargainScraper:
                                 # Look for ANY "next" or "load more" indicator
                                 next_btn = page.locator("ul.pager li.pager-next a").first
                                 if next_btn.is_visible():
-                                    print("[Scraper] Found 'Next' button. Clicking...")
+                                    logger.info("Found 'Next' button. Clicking...")
                                     next_btn.click()
                                     time.sleep(3)
                                     retries = 0
@@ -130,7 +133,7 @@ class OzBargainScraper:
                              except: pass
 
                         if retries >= 10:
-                            print("[Scraper] End of feed reached.")
+                            logger.info("End of feed reached.")
                             break
                     else:
                         retries = 0
@@ -138,8 +141,8 @@ class OzBargainScraper:
                         
                 except Exception as e:
                     if "TargetClosed" in str(e) or "closed" in str(e):
-                         print("[Scraper] Browser window closed. Finalizing.")
-                         break
+                        logger.warning("Browser window closed. Finalizing.")
+                        break
                     pass
                     
             browser.close()
@@ -223,7 +226,7 @@ class OzBargainScraper:
                 comment_count = base_count + remainder
                 has_counted_via_dom = True
             except Exception as nav_e:
-                print(f"Error navigating to last page: {nav_e}")
+                logger.error("Error navigating to last page: %s", nav_e)
                 comment_count = base_count 
         
         # 2. Single Page Count (Fallback or Default)
@@ -576,7 +579,7 @@ class OzBargainScraper:
         
         with sync_playwright() as p:
             if self.cdp_url:
-                print(f"[Scraper] Connecting to Chrome via CDP: {self.cdp_url}")
+                logger.info("Connecting to Chrome via CDP: %s", self.cdp_url)
                 try:
                     browser = p.chromium.connect_over_cdp(self.cdp_url)
                     page = browser.new_page()
