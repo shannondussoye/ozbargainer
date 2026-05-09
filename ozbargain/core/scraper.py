@@ -37,7 +37,7 @@ class OzBargainScraper:
             
             logger.info("Loading profile: %s", base_user_url)
             try:
-                page.goto(base_user_url, timeout=60000)
+                page.goto(base_user_url, timeout=60000, wait_until="domcontentloaded")
                 page.wait_for_selector("div.activities", timeout=15000)
             except Exception as e:
                 logger.error("Error loading profile: %s", e)
@@ -219,7 +219,7 @@ class OzBargainScraper:
                      target_url = target_href
 
                 # Navigate to last page
-                page.goto(target_url)
+                page.goto(target_url, wait_until="domcontentloaded")
                 page.wait_for_selector("div.comment", timeout=5000) 
                 
                 remainder = page.locator("div.comment").count()
@@ -572,7 +572,7 @@ class OzBargainScraper:
         if browser:
             page = browser.new_page()
             try:
-                page.goto(url, timeout=timeout)
+                page.goto(url, timeout=timeout, wait_until="domcontentloaded")
                 return self._extract_deal_data(page, url)
             finally:
                 page.close()
@@ -583,7 +583,7 @@ class OzBargainScraper:
                 try:
                     browser = p.chromium.connect_over_cdp(self.cdp_url)
                     page = browser.new_page()
-                    page.goto(url, timeout=timeout)
+                    page.goto(url, timeout=timeout, wait_until="domcontentloaded")
                     result = self._extract_deal_data(page, url)
                     browser.close()
                     return result
@@ -592,7 +592,7 @@ class OzBargainScraper:
             else:
                 browser = p.chromium.launch(headless=self.headless)
                 page = browser.new_page()
-                page.goto(url, timeout=timeout)
+                page.goto(url, timeout=timeout, wait_until="domcontentloaded")
                 
                 result = self._extract_deal_data(page, url)
                 

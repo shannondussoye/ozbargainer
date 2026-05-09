@@ -168,7 +168,7 @@ class LiveMonitor:
                     page = browser.new_page()
                     
                     logger.info("Navigating to /live...")
-                    page.goto("https://www.ozbargain.com.au/live", timeout=60000)
+                    page.goto("https://www.ozbargain.com.au/live", timeout=60000, wait_until="domcontentloaded")
                     page.wait_for_selector("tbody#livebody", timeout=30000)
                     
                     # Setup Filters: Uncheck Wiki
