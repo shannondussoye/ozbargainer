@@ -18,10 +18,15 @@ graph TD
         DB --> SL[(SQLite - ozbargain.db)]
         M -.-> Docker[Docker Container]
     end
-
     subgraph "External Integration"
         S --> OZ["OzBargain.com.au"]
         T --> TG["Telegram Bot API"]
+    end
+
+    subgraph "Observability"
+        M --> HC["Healthchecks.io (Pulse)"]
+        M --> LT["Logtail (Audit Trail)"]
+        HC --> NT["ntfy (Alerts)"]
     end
 
     subgraph "Utilities (scripts/)"
@@ -47,6 +52,11 @@ graph TD
     * **Context Awareness**: Resolves comment links back to their parent deal nodes.
 * **`ozbargain.db.manager`**: Centralized SQLite state management. Features a **Data Integrity Guard** to prevent Cloudflare blocks from overwriting high popularity scores with zeros. Tracks snapshots for trending analytics and maintains the alert history.
 * **`ozbargain.notifier.telegram`**: Dispatcher for real-time deal alerts.
+* **`ozbargain.utils.logger`**: Professional dual-sink logging utility. 
+    * **Human Sink**: Formatted stdout for terminal debugging.
+    * **Machine Sink**: JSON-lines in `logs/monitor.log` for programmatic analysis.
+    * **Remote Sink**: Real-time structured log streaming to Logtail.
+* **`Health Monitoring`**: Integrated dead-man's switch via Healthchecks.io. Sends a non-blocking pulse after every successful poll cycle to detect hung processes.
 
 ---
 
@@ -72,6 +82,10 @@ TELEGRAM_CHAT_ID="your_chat_id"
 MIN_HEAT_SCORE=60                # Threshold for trending alerts
 TRENDING_CHECK_INTERVAL=30       # Minutes between velocity scans
 POLL_INTERVAL=5                  # Seconds between feed polls
+
+# Observability
+LOGTAIL_TOKEN="your_token"       # Optional: Stream logs to Logtail
+HEALTHCHECK_PING_URL="https://hc-ping.com/uuid" # Optional: Pulse heartbeat
 ```
 
 ---

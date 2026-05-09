@@ -7,7 +7,11 @@ from ..notifier.telegram import TelegramNotifier
 from datetime import datetime, timedelta
 import re
 import random
+import requests
 from typing import Dict, Optional
+from ..utils.logger import setup_logger
+
+logger = setup_logger("monitor")
 
 class LiveMonitor:
     def __init__(self):
@@ -28,6 +32,7 @@ class LiveMonitor:
         self.trending_check_interval = int(os.getenv("TRENDING_CHECK_INTERVAL", 30)) # Minutes
         self.poll_interval = int(os.getenv("POLL_INTERVAL", 5)) # Seconds
         self.scrape_cooldown = int(os.getenv("SCRAPE_COOLDOWN_SECONDS", 120)) # 2 mins
+        self.healthcheck_url = os.getenv("HEALTHCHECK_PING_URL")
 
     def process_deal(self, url: str, browser=None, event_data: Dict = None, timeout: int = 30000) -> (Optional[str], Optional[str]):
         """
@@ -37,7 +42,7 @@ class LiveMonitor:
         deal_data = self.scraper.scrape_deal_page(url, browser=browser, timeout=timeout)
         
         if "error" in deal_data:
-            print(f"[LiveMonitor] Error scraping {url}: {deal_data['error']}")
+            logger.error("Error scraping %s: %s", url, deal_data['error'])
             return None, None
             
         # Merge event data
@@ -57,7 +62,7 @@ class LiveMonitor:
         if deal_id and deal_id.startswith("comment/"):
              parent_id = self.db.resolve_node_id_by_title(deal_data.get("title"))
              if parent_id:
-                  print(f"[LiveMonitor] Resolved comment {deal_id} to parent node {parent_id}")
+                  logger.info("Resolved comment %s to parent node %s", deal_id, parent_id)
                   deal_id = parent_id
                   deal_data["id"] = deal_id
         
@@ -68,7 +73,7 @@ class LiveMonitor:
         try:
             # Skip if expired
             if deal_data.get("is_expired"):
-                print(f"[LiveMonitor] Skipping alerts for Expired Deal: {deal_id}")
+                logger.info("Skipping alerts for Expired Deal: %s", deal_id)
                 return deal_id, deal_data.get("url")
 
             watched_tags = self.db.get_watched_tags()
@@ -89,17 +94,17 @@ class LiveMonitor:
                     
                     if self.notifier.send_message(alert_text, priority=True):
                         self.db.log_alert(deal_id, "priority")
-                        print(f"[LiveMonitor] Sent Alert for tags: {matches}")
+                        logger.info("Sent Alert for tags: %s", matches)
                     else:
-                        print(f"[LiveMonitor] Failed to send Alert for tags: {matches}")
+                        logger.error("Failed to send Alert for tags: %s", matches)
                 else:
-                    print(f"[LiveMonitor] Skip Alert (Already Sent): {matches}")
+                    logger.info("Skip Alert (Already Sent): %s", matches)
         except Exception as e:
-            print(f"[LiveMonitor] Error checking alerts: {e}")
+            logger.error("Error checking alerts: %s", e)
 
         # Log 
         title_sample = deal_data.get("title", "No Title")[:50]
-        print(f"[LiveMonitor] Upserted Deal: {deal_id} - {title_sample}")
+        logger.info("Upserted Deal: %s - %s", deal_id, title_sample)
         
         return deal_id, deal_data.get("url")
 
@@ -132,33 +137,42 @@ class LiveMonitor:
         except:
             return datetime.now()
 
+    def ping_healthcheck(self):
+        """Sends a heartbeat to Healthchecks.io if configured."""
+        if not self.healthcheck_url:
+            return
+        try:
+            requests.get(self.healthcheck_url, timeout=10)
+        except Exception as e:
+            logger.error("Healthcheck ping failed: %s", e)
+
     def run(self):
-        print("Starting Live Monitor...")
+        logger.info("Starting Live Monitor...")
         last_trending_check = datetime.now() - timedelta(minutes=self.trending_check_interval)
         
         while True:
-            print("[LiveMonitor] Initializing browser session...")
+            logger.info("Initializing browser session...")
             try:
                 with sync_playwright() as p:
                     if self.cdp_url:
-                        print(f"[LiveMonitor] Connecting to Chrome via CDP: {self.cdp_url}")
+                        logger.info("Connecting to Chrome via CDP: %s", self.cdp_url)
                         try:
                             browser = p.chromium.connect_over_cdp(self.cdp_url)
                         except Exception as cdp_e:
-                            print(f"[LiveMonitor] CDP Connection failed: {cdp_e}. Falling back to local browser.")
+                            logger.warning("CDP Connection failed: %s. Falling back to local browser.", cdp_e)
                             browser = p.chromium.launch(headless=True)
                     else:
-                        print("[LiveMonitor] Launching local browser...")
+                        logger.info("Launching local browser...")
                         browser = p.chromium.launch(headless=True)
                     
                     page = browser.new_page()
                     
-                    print("[LiveMonitor] Navigating to /live...")
+                    logger.info("Navigating to /live...")
                     page.goto("https://www.ozbargain.com.au/live", timeout=60000)
                     page.wait_for_selector("tbody#livebody", timeout=30000)
                     
                     # Setup Filters: Uncheck Wiki
-                    print("[LiveMonitor] Configuring filters...")
+                    logger.info("Configuring filters...")
                     filter_script = """
                         () => {
                             function setFilterByText(text, desiredState) {
@@ -200,7 +214,7 @@ class LiveMonitor:
                     page.evaluate(type_script)
                     page.wait_for_timeout(500)
                     
-                    print("[LiveMonitor] Filters configured. Listening for updates...")
+                    logger.info("Filters configured. Listening for updates...")
                     
                     last_success_time = datetime.now()
                     session_start_time = datetime.now()
@@ -208,13 +222,13 @@ class LiveMonitor:
                     while True:
                         # Periodic session refresh (every 4 hours)
                         if datetime.now() - session_start_time > timedelta(hours=4):
-                            print("[LiveMonitor] Periodic session refresh (4h limit reached).")
+                            logger.info("Periodic session refresh (4h limit reached).")
                             break
 
                         try:
                             # --- Trending Check ---
                             if datetime.now() - last_trending_check > timedelta(minutes=self.trending_check_interval):
-                                print("[LiveMonitor] Performing scheduled trending deals check...")
+                                logger.info("Performing scheduled trending deals check...")
                                 last_trending_check = datetime.now()
                                 candidates = self.db.get_trending_deals(hours=24, limit=-1, min_score=self.min_heat_score)
                                 
@@ -229,9 +243,9 @@ class LiveMonitor:
                                         
                                         if self.notifier.send_message(msg, priority=False):
                                             self.db.log_alert(deal_id, "trending")
-                                            print(f"[LiveMonitor] Sent Trending Alert: {deal['title']}")
+                                            logger.info("Sent Trending Alert: %s", deal['title'])
                                         else:
-                                            print(f"[LiveMonitor] Failed to send Trending Alert: {deal['title']}")
+                                            logger.error("Failed to send Trending Alert: %s", deal['title'])
 
                             # --- Deal Stream Check ---
                             rows = page.locator("tbody#livebody tr").all()
@@ -240,7 +254,7 @@ class LiveMonitor:
                             if rows:
                                 last_success_time = datetime.now()
                             elif datetime.now() - last_success_time > timedelta(minutes=10):
-                                print("[LiveMonitor] No rows seen for 10 minutes. Session may be stale/blocked. Restarting...")
+                                logger.warning("No rows seen for 10 minutes. Session may be stale/blocked. Restarting...")
                                 break
 
                             recent_rows = rows[:20]
@@ -304,7 +318,7 @@ class LiveMonitor:
                                     if last_scraped and (now_time - last_scraped).total_seconds() < self.scrape_cooldown:
                                         # Only log skip if it's a node/title ID or if we haven't logged it too much
                                         if random.random() < 0.1: # 10% chance to log skip to avoid spam
-                                            print(f"[LiveMonitor] Skip re-scrape (Cooldown): {cooldown_key}")
+                                            logger.info("Skip re-scrape (Cooldown): %s", cooldown_key)
                                         continue 
                                         
                                     self.last_scraped_times[cooldown_key] = now_time
@@ -314,7 +328,7 @@ class LiveMonitor:
                                 except Exception as e:
                                     if "Target page, context or browser has been closed" in str(e):
                                         raise e 
-                                    print(f"[LiveMonitor] Row processing error: {e}")
+                                    logger.error("Row processing error: %s", e)
                                     pass
 
                             # --- Housekeeping ---
@@ -325,15 +339,16 @@ class LiveMonitor:
                         except Exception as loop_e:
                             if "Target page, context or browser has been closed" in str(loop_e):
                                 raise loop_e
-                            print(f"[LiveMonitor] Inner loop error: {loop_e}")
+                            logger.error("Inner loop error: %s", loop_e)
                         
+                        self.ping_healthcheck()
                         time.sleep(self.poll_interval)
                     
                     browser.close()
                         
             except Exception as e:
-                print(f"[LiveMonitor] Fatal session error: {e}")
-                print("[LiveMonitor] Restarting browser session in 15 seconds...")
+                logger.error("Fatal session error: %s", e)
+                logger.info("Restarting browser session in 15 seconds...")
                 time.sleep(15)
 
 if __name__ == "__main__":
