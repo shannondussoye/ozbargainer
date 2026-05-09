@@ -13,6 +13,7 @@ services:
     volumes:
       - /etc/localtime:/etc/localtime:ro
       - ./ozbargain.db:/app/ozbargain.db
+      - ./backups:/app/backups
     logging:
       driver: "json-file"
       options:
