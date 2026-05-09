@@ -29,9 +29,9 @@ function start_chrome() {
     
     # Wait for Chrome to be ready
     echo "[Manage] Waiting for Chrome to initialize..."
-    for i in {1..10}; do
-        if nc -zv 127.0.0.1 $PORT > /dev/null 2>&1; then
-            echo "[Manage] Chrome is ready!"
+    for i in {1..15}; do
+        if curl -s http://127.0.0.1:$PORT/json/version > /dev/null 2>&1; then
+            echo "[Manage] Chrome is fully ready!"
             return 0
         fi
         sleep 1
