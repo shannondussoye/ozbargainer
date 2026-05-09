@@ -84,7 +84,7 @@ TRENDING_CHECK_INTERVAL=30       # Minutes between velocity scans
 POLL_INTERVAL=5                  # Seconds between feed polls
 
 # Observability
-LOGTAIL_TOKEN="your_token"       # Optional: Stream logs to Logtail
+LOGTAIL_SOURCE_TOKEN="your_token"       # Optional: Stream logs to Logtail
 HEALTHCHECK_PING_URL="https://hc-ping.com/uuid" # Optional: Pulse heartbeat
 ```
 

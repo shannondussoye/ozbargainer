@@ -1,7 +1,16 @@
 import logging
 import os
 import sys
+import uuid
 from pythonjsonlogger import jsonlogger
+
+SESSION_ID = str(uuid.uuid4())[:8]
+
+class SessionContextFilter(logging.Filter):
+    def filter(self, record):
+        record.session_id = SESSION_ID
+        record.project_name = "ozbargainer"
+        return True
 
 def setup_logger(name: str = "ozbargain"):
     logger = logging.getLogger(name)
@@ -11,6 +20,10 @@ def setup_logger(name: str = "ozbargain"):
         return logger
         
     logger.setLevel(logging.INFO)
+    
+    # Add session filter
+    session_filter = SessionContextFilter()
+    logger.addFilter(session_filter)
     
     # 1. Stdout Handler (Human Readable)
     stdout_handler = logging.StreamHandler(sys.stdout)
@@ -40,7 +53,7 @@ def setup_logger(name: str = "ozbargain"):
     logger.addHandler(file_handler)
     
     # 3. Logtail Handler (Optional)
-    logtail_token = os.getenv("LOGTAIL_TOKEN")
+    logtail_token = os.getenv("LOGTAIL_SOURCE_TOKEN")
     if logtail_token:
         try:
             from logtail import LogtailHandler

@@ -222,6 +222,8 @@ class StorageManager:
         
         conn.commit()
         conn.close()
+        
+        logger.info("Successful deal upsert for %s", resolved_id, extra={"event_type": "storage_upsert", "items_count": 1})
         return resolved_id
 
     def cleanup_snapshots(self, hours_retention: int = 168):
