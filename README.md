@@ -105,10 +105,10 @@ docker compose logs -f monitor
 ## 🛠 Local Development
 
 ### Installation
-1. Install dependencies:
+1. Install dependencies using `uv` (deterministic builds):
    ```bash
-   pip install -r requirements.txt
-   playwright install chromium
+   uv pip sync requirements.lock
+   uv run playwright install chromium
    ```
 
 2. Run the monitor (from the project root):
@@ -138,3 +138,6 @@ Useful utilities located in the `scripts/` directory:
 OzBargain employs aggressive security verification (Cloudflare Turnstile). This scraper implements a **Hybrid Resolution** strategy: 
 1. If a direct scrape is blocked, it resolves the event using metadata captured from the Live Feed row.
 2. For comments, it automatically looks up the parent deal in the database to ensure data integrity.
+
+### CDP Security (Priority 1)
+When running the `manage.sh` Hybrid Bridge mode, the host Google Chrome instance exposes its Remote Debugging Port via CDP. To prevent local network Remote Code Execution (RCE) vulnerabilities, the script explicitly binds the CDP socket to the `127.0.0.1` loopback interface. The Python container securely communicates with the host over this isolated loopback using Docker's `host` networking.
