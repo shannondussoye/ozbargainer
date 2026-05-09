@@ -6,7 +6,7 @@ WORKDIR /app
 
 # Install Python dependencies and tzdata
 COPY requirements.lock .
-RUN apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install -y tzdata && \
+RUN apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install -y tzdata sqlite3 && \
     pip install uv && \
     uv pip sync requirements.lock --system && \
     playwright install chromium && \
