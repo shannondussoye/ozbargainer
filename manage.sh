@@ -1,7 +1,7 @@
 #!/bin/bash
 
 # Configuration
-PORT=9224
+PORT=9228
 PROFILE_DIR="$HOME/.ozbargain-chrome-profile"
 IMAGE_NAME="ozbargain-scraper"
 CONTAINER_NAME="ozbargain-monitor"
@@ -13,8 +13,9 @@ if [ ! -f .env ]; then
     exit 1
 fi
 
-# Create profile dir if missing
+# Create profile dir and db file if missing
 mkdir -p "$PROFILE_DIR"
+touch "$DB_PATH"
 
 function start_chrome() {
     echo "[Manage] Starting Google Chrome in debug mode on port $PORT..."
