@@ -7,9 +7,14 @@ IMAGE_NAME="ozbargain-scraper"
 CONTAINER_NAME="ozbargain-monitor"
 DB_PATH="$(pwd)/ozbargain.db"
 
-# Create profile dir and .env if missing
+# Ensure .env exists
+if [ ! -f .env ]; then
+    echo "[Error] .env file not found. Please copy .env.example to .env and configure TELEGRAM variables."
+    exit 1
+fi
+
+# Create profile dir if missing
 mkdir -p "$PROFILE_DIR"
-touch .env
 
 function start_chrome() {
     echo "[Manage] Starting Google Chrome in debug mode on port $PORT..."
