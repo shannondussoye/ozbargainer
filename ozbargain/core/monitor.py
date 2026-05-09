@@ -94,7 +94,7 @@ class LiveMonitor:
                     
                     if self.notifier.send_message(alert_text, priority=True):
                         self.db.log_alert(deal_id, "priority")
-                        logger.info("Sent Alert for tags: %s", matches)
+                        logger.info("Sent Alert for tags: %s", matches, extra={"event_type": "notification", "priority": "high"})
                     else:
                         logger.error("Failed to send Alert for tags: %s", matches)
                 else:
@@ -147,7 +147,7 @@ class LiveMonitor:
             logger.error("Healthcheck ping failed: %s", e)
 
     def run(self):
-        logger.info("Starting Live Monitor...")
+        logger.info("Starting Live Monitor...", extra={"event_type": "startup"})
         last_trending_check = datetime.now() - timedelta(minutes=self.trending_check_interval)
         
         while True:
@@ -243,7 +243,7 @@ class LiveMonitor:
                                         
                                         if self.notifier.send_message(msg, priority=False):
                                             self.db.log_alert(deal_id, "trending")
-                                            logger.info("Sent Trending Alert: %s", deal['title'])
+                                            logger.info("Sent Trending Alert: %s", deal['title'], extra={"event_type": "notification", "priority": "normal"})
                                         else:
                                             logger.error("Failed to send Trending Alert: %s", deal['title'])
 

@@ -471,7 +471,8 @@ class OzBargainScraper:
                 data["is_expired"] = True
             
             # Post-Extraction Cleanup: Title Noise
-            if data.get("title") in ["OzBargain", "www.ozbargain.com.au"]:
+            if data.get("title") in ["OzBargain", "www.ozbargain.com.au", "Performing security verification"]:
+                 logger.warning("Bot-wall detected", extra={"event_type": "security_challenge", "challenge_type": "cloudflare"})
                  # Attempt to extract from h2 if h1 was generic
                  h2_el = page.locator("h2").first
                  if h2_el.count() > 0:
