@@ -85,7 +85,7 @@ To bypass Cloudflare bot detection, use the `manage.sh` orchestrator. This runs 
 
 ```bash
 # Start host browser and docker monitor
-./manage.sh start
+make start
 ```
 
 ### Standard Deployment
@@ -97,7 +97,7 @@ docker compose up -d --build
 
 ### 3. Check Logs
 ```bash
-docker compose logs -f monitor
+make logs
 ```
 
 ---
@@ -116,6 +116,12 @@ docker compose logs -f monitor
    export PYTHONPATH=$PYTHONPATH:.
    python3 -m ozbargain.core.monitor
    ```
+
+### Running Tests
+We use `pytest` for validating core logic (e.g., Data Integrity Guard and HTML parsing). Run the suite via the Makefile:
+```bash
+make test
+```
 
 ---
 
