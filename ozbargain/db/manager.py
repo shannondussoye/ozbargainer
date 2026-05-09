@@ -107,9 +107,17 @@ class StorageManager:
         # Config Table for User Interests (Watched Tags)
         cursor.execute('''
             CREATE TABLE IF NOT EXISTS watched_tags (
-                tag TEXT PRIMARY KEY
+                tag TEXT PRIMARY KEY,
+                is_active BOOLEAN DEFAULT 1
             )
         ''')
+        
+        # Migration: Add is_active to watched_tags if missing
+        try:
+            cursor.execute("ALTER TABLE watched_tags ADD COLUMN is_active BOOLEAN DEFAULT 1")
+            cursor.execute("UPDATE watched_tags SET is_active = 1 WHERE is_active IS NULL")
+        except sqlite3.OperationalError:
+            pass
 
         # Alert History (Prevents Duplicate Notifications)
         cursor.execute('''

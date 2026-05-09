@@ -89,26 +89,15 @@ To bypass Cloudflare bot detection, use the `manage.sh` orchestrator. This runs 
 ```
 
 ### Standard Deployment
-Alternatively, build and run the container manually:
+Alternatively, you can run the container manually via docker compose:
 ```bash
-docker build -t ozbargain-scraper .
-
-docker run -d \
-    --name ozbargain-monitor \
-    --network host \
-    --memory 768m \
-    --cpus 0.5 \
-    --env-file .env \
-    -e TZ=Australia/Sydney \
-    -v /etc/localtime:/etc/localtime:ro \
-    -v $(pwd)/ozbargain.db:/app/ozbargain.db \
-    ozbargain-scraper
-
+# Ensure CHROME_CDP_URL is set in your .env or exported if using CDP
+docker compose up -d --build
 ```
 
 ### 3. Check Logs
 ```bash
-docker logs -f ozbargain-monitor
+docker compose logs -f monitor
 ```
 
 ---
@@ -116,10 +105,10 @@ docker logs -f ozbargain-monitor
 ## 🛠 Local Development
 
 ### Installation
-1. Install dependencies:
+1. Install dependencies using `uv` (deterministic builds):
    ```bash
-   pip install -r requirements.txt
-   playwright install chromium
+   uv pip sync requirements.lock
+   uv run playwright install chromium
    ```
 
 2. Run the monitor (from the project root):
@@ -149,3 +138,6 @@ Useful utilities located in the `scripts/` directory:
 OzBargain employs aggressive security verification (Cloudflare Turnstile). This scraper implements a **Hybrid Resolution** strategy: 
 1. If a direct scrape is blocked, it resolves the event using metadata captured from the Live Feed row.
 2. For comments, it automatically looks up the parent deal in the database to ensure data integrity.
+
+### CDP Security (Priority 1)
+When running the `manage.sh` Hybrid Bridge mode, the host Google Chrome instance exposes its Remote Debugging Port via CDP. To prevent local network Remote Code Execution (RCE) vulnerabilities, the script explicitly binds the CDP socket to the `127.0.0.1` loopback interface. The Python container securely communicates with the host over this isolated loopback using Docker's `host` networking.

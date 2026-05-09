@@ -5,9 +5,10 @@ FROM mcr.microsoft.com/playwright/python:v1.49.0-jammy
 WORKDIR /app
 
 # Install Python dependencies and tzdata
-COPY requirements.txt .
+COPY requirements.lock .
 RUN apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install -y tzdata && \
-    pip install --no-cache-dir -r requirements.txt && \
+    pip install uv && \
+    uv pip sync requirements.lock --system && \
     playwright install chromium && \
     rm -rf /var/lib/apt/lists/*
 

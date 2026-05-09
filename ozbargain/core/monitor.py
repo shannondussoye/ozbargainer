@@ -13,6 +13,11 @@ class LiveMonitor:
     def __init__(self):
         self.db = StorageManager()
         self.cdp_url = os.getenv("CHROME_CDP_URL")
+        if self.cdp_url:
+            from urllib.parse import urlparse
+            parsed_url = urlparse(self.cdp_url)
+            if parsed_url.hostname not in ["127.0.0.1", "localhost"]:
+                raise ValueError(f"CRITICAL: CDP URL must bind to localhost/127.0.0.1 to prevent RCE. Got: {parsed_url.hostname}")
         self.scraper = OzBargainScraper(headless=True, cdp_url=self.cdp_url)
         self.notifier = TelegramNotifier()
         self.seen_rows = set() # Cache to avoid re-processing simple rows in same session

@@ -1,0 +1,15 @@
+services:
+  monitor:
+    build: .
+    container_name: ozbargain-monitor
+    restart: always
+    network_mode: host
+    mem_limit: 768m
+    cpus: 0.5
+    env_file: .env
+    environment:
+      - TZ=Australia/Sydney
+      - CHROME_CDP_URL=${CHROME_CDP_URL:-http://127.0.0.1:9228}
+    volumes:
+      - /etc/localtime:/etc/localtime:ro
+      - ./ozbargain.db:/app/ozbargain.db
