@@ -7,8 +7,9 @@ IMAGE_NAME="ozbargain-scraper"
 CONTAINER_NAME="ozbargain-monitor"
 DB_PATH="$(pwd)/ozbargain.db"
 
-# Create profile dir if missing
+# Create profile dir and .env if missing
 mkdir -p "$PROFILE_DIR"
+touch .env
 
 function start_chrome() {
     echo "[Manage] Starting Google Chrome in debug mode on port $PORT..."
