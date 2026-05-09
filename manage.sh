@@ -14,7 +14,7 @@ function start_chrome() {
     echo "[Manage] Starting Google Chrome in debug mode on port $PORT..."
     google-chrome-stable \
         --remote-debugging-port=$PORT \
-        --remote-debugging-address=0.0.0.0 \
+        --remote-debugging-address=127.0.0.1 \
         --user-data-dir="$PROFILE_DIR" \
         --headless=new \
         --disable-gpu \
@@ -40,25 +40,12 @@ function stop_chrome() {
 }
 
 function run_monitor() {
-    echo "[Manage] Starting Docker container ($CONTAINER_NAME) with resource limits..."
+    echo "[Manage] Starting Docker container via docker-compose..."
     
-    # Stop existing container if any
-    docker stop "$CONTAINER_NAME" > /dev/null 2>&1
-    docker rm "$CONTAINER_NAME" > /dev/null 2>&1
-
-    docker run -d \
-        --name "$CONTAINER_NAME" \
-        --network host \
-        --memory 768m \
-        --cpus 0.5 \
-        --env-file .env \
-        -e CHROME_CDP_URL="http://localhost:$PORT" \
-        -e TZ=Australia/Sydney \
-        -v /etc/localtime:/etc/localtime:ro \
-        -v "$DB_PATH":/app/ozbargain.db \
-        "$IMAGE_NAME"
+    export CHROME_CDP_URL="http://127.0.0.1:$PORT"
+    docker compose up -d --build
     
-    echo "[Manage] Monitor is running. Use 'docker logs -f $CONTAINER_NAME' to view logs."
+    echo "[Manage] Monitor is running. Use 'docker compose logs -f monitor' to view logs."
 }
 
 case "$1" in
@@ -67,8 +54,7 @@ case "$1" in
         run_monitor
         ;;
     stop)
-        docker stop "$CONTAINER_NAME"
-        docker rm "$CONTAINER_NAME"
+        docker compose down
         stop_chrome
         ;;
     restart)

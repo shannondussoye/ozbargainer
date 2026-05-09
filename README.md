@@ -89,26 +89,15 @@ To bypass Cloudflare bot detection, use the `manage.sh` orchestrator. This runs 
 ```
 
 ### Standard Deployment
-Alternatively, build and run the container manually:
+Alternatively, you can run the container manually via docker compose:
 ```bash
-docker build -t ozbargain-scraper .
-
-docker run -d \
-    --name ozbargain-monitor \
-    --network host \
-    --memory 768m \
-    --cpus 0.5 \
-    --env-file .env \
-    -e TZ=Australia/Sydney \
-    -v /etc/localtime:/etc/localtime:ro \
-    -v $(pwd)/ozbargain.db:/app/ozbargain.db \
-    ozbargain-scraper
-
+# Ensure CHROME_CDP_URL is set in your .env or exported if using CDP
+docker compose up -d --build
 ```
 
 ### 3. Check Logs
 ```bash
-docker logs -f ozbargain-monitor
+docker compose logs -f monitor
 ```
 
 ---

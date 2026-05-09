@@ -11,6 +11,11 @@ class OzBargainScraper:
     def __init__(self, headless: bool = True, cdp_url: str = None):
         self.headless = headless
         self.cdp_url = cdp_url or os.getenv("CHROME_CDP_URL")
+        if self.cdp_url:
+            from urllib.parse import urlparse
+            parsed_url = urlparse(self.cdp_url)
+            if parsed_url.hostname not in ["127.0.0.1", "localhost"]:
+                raise ValueError(f"CRITICAL: CDP URL must bind to localhost/127.0.0.1 to prevent RCE. Got: {parsed_url.hostname}")
         self.base_url = "https://www.ozbargain.com.au"
 
 
