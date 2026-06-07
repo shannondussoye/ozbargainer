@@ -23,7 +23,7 @@ class TelegramNotifier:
         if not self.enabled:
             prefix = "🚨 " if priority else "ℹ️ "
             print(f"\n{prefix} [TELEGRAM MOCK] {timestamp}: {text}\n")
-            return
+            return True
 
         # Real Send using requests
         api_url = f"https://api.telegram.org/bot{self.bot_token}/sendMessage"

@@ -1,0 +1,15 @@
+.git/
+.env
+*.db
+backups/
+logs/
+.mypy_cache/
+.ruff_cache/
+.pytest_cache/
+__pycache__/
+venv/
+.venv/
+chrome_startup.log
+TODO.md
+.agents/
+.gemini/

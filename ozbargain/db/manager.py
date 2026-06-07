@@ -128,8 +128,10 @@ class StorageManager:
         conn = self._get_connection()
         cursor = conn.cursor()
 
-        # SQLite 'now', '-X hours' syntax
-        cursor.execute(f"DELETE FROM deal_snapshots WHERE timestamp < datetime('now', '-{hours_retention} hours')")
+        cursor.execute(
+            "DELETE FROM deal_snapshots WHERE timestamp < datetime('now', ? || ' hours')",
+            (f"-{int(hours_retention)}",),
+        )
         deleted = cursor.rowcount
 
         conn.commit()
@@ -146,20 +148,24 @@ class StorageManager:
         conn.row_factory = sqlite3.Row
         cursor = conn.cursor()
 
-        # SQL Construction
-        limit_sql = f"LIMIT {limit}" if limit > 0 else ""
+        hours_modifier = f"-{int(hours)} hours"
 
-        # Simple Heat Score Query on Current State
-        cursor.execute(f"""
+        query = """
             SELECT *, ((upvotes * 2) + comment_count) as heat_score
             FROM live_deals
-            WHERE timestamp > datetime('now', '-{hours} hours')
-            AND ((upvotes * 2) + comment_count) >= {min_score}
+            WHERE timestamp > datetime('now', ?)
+            AND ((upvotes * 2) + comment_count) >= ?
             AND (is_expired = 0 OR is_expired IS NULL)
             AND source = 'live'
             ORDER BY heat_score DESC
-            {limit_sql}
-        """)
+        """
+        params: list = [hours_modifier, int(min_score)]
+
+        if limit > 0:
+            query += " LIMIT ?"
+            params.append(int(limit))
+
+        cursor.execute(query, params)
 
         rows = cursor.fetchall()
         conn.close()
