@@ -141,7 +141,7 @@ class LiveMonitor:
                 delta = timedelta(days=val)
 
             return now - delta
-        except:
+        except Exception:
             return datetime.now()
 
     def ping_healthcheck(self):

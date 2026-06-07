@@ -94,7 +94,7 @@ class FastScraper:
                 try:
                     linked_comment_id = r.url.split("#comment-")[1]
                     linked_comment_id = f"comment-{linked_comment_id}"
-                except:
+                except Exception:
                     pass
             elif "/comment/" in r.url:
                 try:
@@ -104,7 +104,7 @@ class FastScraper:
                     # handle /redir or trailing slash
                     part = part.replace("/redir", "").replace("/", "")
                     linked_comment_id = f"comment-{part}"
-                except:
+                except Exception:
                     pass
 
             # Fallback: Check input URL if resolved URL is weird
@@ -113,7 +113,7 @@ class FastScraper:
                     clean_url = url.split("?")[0]
                     part = clean_url.split("/comment/")[1].split("/")[0]
                     linked_comment_id = f"comment-{part}"
-                except:
+                except Exception:
                     pass
 
             if linked_comment_id:
@@ -235,7 +235,7 @@ class BrowserScraper:
 
                         yield {"text": text, "url": full_url}
 
-                    except:
+                    except Exception:
                         continue
 
                 if count >= max_items:
@@ -275,7 +275,7 @@ class BrowserScraper:
                                     retries = 0
                                     last_height = page.evaluate("document.body.scrollHeight")
                                     continue
-                            except:
+                            except Exception:
                                 pass
 
                         if retries >= 10:
@@ -458,7 +458,7 @@ class BrowserScraper:
                         data["title"] = page.title().split(" - ")[0]
                     # Tag as external
                     data["tags"] = ["External"]
-                except:
+                except Exception:
                     data["title"] = f"External: {final_url}"
                 return data
 
@@ -560,7 +560,7 @@ class BrowserScraper:
             if page.locator("div.n-vote span.voteup span").count() > 0:
                 try:
                     data["upvotes"] = int(page.locator("div.n-vote span.voteup span").first.text_content().strip())
-                except:
+                except Exception:
                     data["upvotes"] = 0
             else:
                 data["upvotes"] = 0
@@ -569,7 +569,7 @@ class BrowserScraper:
             if page.locator("div.n-vote span.votedown span").count() > 0:
                 try:
                     data["downvotes"] = int(page.locator("div.n-vote span.votedown span").first.text_content().strip())
-                except:
+                except Exception:
                     data["downvotes"] = 0
             else:
                 data["downvotes"] = 0

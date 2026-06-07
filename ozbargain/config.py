@@ -9,12 +9,9 @@ config_dir = os.path.dirname(os.path.abspath(__file__))
 project_root = os.path.dirname(config_dir)
 env_path = os.path.join(project_root, ".env")
 
+
 class Settings(BaseSettings):
-    model_config = SettingsConfigDict(
-        env_file=env_path,
-        env_file_encoding="utf-8",
-        extra="ignore"
-    )
+    model_config = SettingsConfigDict(env_file=env_path, env_file_encoding="utf-8", extra="ignore")
 
     telegram_bot_token: Optional[str] = Field(default=None, validation_alias="TELEGRAM_BOT_TOKEN")
     telegram_chat_id: Optional[str] = Field(default=None, validation_alias="TELEGRAM_CHAT_ID")
@@ -26,8 +23,7 @@ class Settings(BaseSettings):
     chrome_cdp_url: Optional[str] = Field(default=None, validation_alias="CHROME_CDP_URL")
     ozbargain_db_path: str = Field(default="ozbargain.db", validation_alias="OZBARGAIN_DB_PATH")
     logtail_token: Optional[str] = Field(
-        default=None,
-        validation_alias=AliasChoices("LOGTAIL_TOKEN", "LOGTAIL_SOURCE_TOKEN")
+        default=None, validation_alias=AliasChoices("LOGTAIL_TOKEN", "LOGTAIL_SOURCE_TOKEN")
     )
 
     @field_validator("chrome_cdp_url")
@@ -36,8 +32,11 @@ class Settings(BaseSettings):
         if v:
             parsed_url = urlparse(v)
             if parsed_url.hostname not in ["127.0.0.1", "localhost"]:
-                raise ValueError(f"CRITICAL: CDP URL must bind to localhost/127.0.0.1 to prevent RCE. Got: {parsed_url.hostname}")
+                raise ValueError(
+                    f"CRITICAL: CDP URL must bind to localhost/127.0.0.1 to prevent RCE. Got: {parsed_url.hostname}"
+                )
         return v
+
 
 # Singleton settings instance
 settings = Settings()
