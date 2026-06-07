@@ -16,7 +16,7 @@ venv/
 brain/
 chrome_startup.log
 TODO.md
-logs/backups/
+logs/
 
 # Linting & Caches
 .mypy_cache/
