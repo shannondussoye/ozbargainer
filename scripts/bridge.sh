@@ -26,7 +26,7 @@ function start() {
         --headless=new \
         --disable-gpu \
         --no-sandbox > "$LOG_FILE" 2>&1 &
-    
+
     # Wait for Chrome to be ready
     echo "[Bridge] Waiting for Chrome to initialize..."
     for i in {1..15}; do
@@ -36,7 +36,7 @@ function start() {
         fi
         sleep 1
     done
-    
+
     echo "[Bridge] Error: Chrome failed to start or bind to port $PORT."
     if [ -f "$LOG_FILE" ]; then
         tail -n 20 "$LOG_FILE"
