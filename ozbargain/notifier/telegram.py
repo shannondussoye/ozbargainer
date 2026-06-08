@@ -1,6 +1,9 @@
 import requests
 from datetime import datetime
 from ..config import settings
+from ..utils.logger import setup_logger
+
+logger = setup_logger("notifier")
 
 
 class TelegramNotifier:
@@ -10,7 +13,7 @@ class TelegramNotifier:
         self.enabled = bool(self.bot_token and self.chat_id)
 
         if not self.enabled:
-            print("[Notifier] Telegram Token/Chat ID not found. Running in MOCK mode (Printing to console).")
+            logger.info("Telegram Token/Chat ID not found. Running in MOCK mode (printing to console).")
 
     def send_message(self, text: str, priority: bool = False):
         """
@@ -22,7 +25,7 @@ class TelegramNotifier:
 
         if not self.enabled:
             prefix = "🚨 " if priority else "ℹ️ "
-            print(f"\n{prefix} [TELEGRAM MOCK] {timestamp}: {text}\n")
+            logger.info("[TELEGRAM MOCK] %s: %s", timestamp, text)
             return True
 
         # Real Send using requests
@@ -35,7 +38,7 @@ class TelegramNotifier:
             response.raise_for_status()
             return True
         except Exception as e:
-            print(f"[Notifier] Error sending message: {e}")
+            logger.error("Error sending Telegram message: %s", e)
             return False
 
 

@@ -39,11 +39,10 @@ def test_data_integrity_guard_preserves_upvotes(db):
         )
     )
 
-    conn = db._get_connection()
-    cursor = conn.cursor()
-    cursor.execute("SELECT upvotes, comment_count FROM live_deals WHERE resolved_id = ?", (deal_id,))
-    row = cursor.fetchone()
-    conn.close()
+    with db._get_connection() as conn:
+        cursor = conn.cursor()
+        cursor.execute("SELECT upvotes, comment_count FROM live_deals WHERE resolved_id = ?", (deal_id,))
+        row = cursor.fetchone()
 
     assert row is not None
     # Data integrity guard should have preserved the 50 and 10
@@ -61,11 +60,10 @@ def test_data_integrity_guard_updates_real_votes(db):
 
     db.upsert_live_deal(DealResult(id=deal_id, title="Deal 2", upvotes=60))
 
-    conn = db._get_connection()
-    cursor = conn.cursor()
-    cursor.execute("SELECT upvotes FROM live_deals WHERE resolved_id = ?", (deal_id,))
-    row = cursor.fetchone()
-    conn.close()
+    with db._get_connection() as conn:
+        cursor = conn.cursor()
+        cursor.execute("SELECT upvotes FROM live_deals WHERE resolved_id = ?", (deal_id,))
+        row = cursor.fetchone()
 
     assert row[0] == 60
 
@@ -84,3 +82,22 @@ def test_alert_history_caching(db):
     assert db.has_alerted(deal_id, alert_type)
     # Should be false for a different type
     assert not db.has_alerted(deal_id, "keyword_match")
+
+
+def test_connection_context_manager_closes_on_error(db):
+    """
+    Verify that _get_connection closes the connection even if an exception occurs.
+    """
+    import sqlite3
+    from unittest.mock import MagicMock, patch
+
+    mock_conn = MagicMock(spec=sqlite3.Connection)
+    with patch("sqlite3.connect", return_value=mock_conn):
+        try:
+            with db._get_connection():
+                raise ValueError("Test error")
+        except ValueError:
+            pass
+
+    mock_conn.close.assert_called_once()
+
