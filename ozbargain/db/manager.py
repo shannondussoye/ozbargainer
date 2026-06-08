@@ -37,7 +37,7 @@ class StorageManager:
         # Perform initial cleanup on startup
         self.cleanup_snapshots()
 
-    def upsert_live_deal(self, deal: "DealResult", source: str = "live") -> Optional[str]:
+    def upsert_live_deal(self, deal: "DealResult", source: str = "live") -> str:
         """Inserts or updates a deal record, and logs a history snapshot."""
         with self._get_connection() as conn:
             cursor = conn.cursor()
