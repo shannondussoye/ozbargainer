@@ -4,7 +4,7 @@
 # It ensures consistency even while the bot is active.
 
 # Configuration
-PROJECT_DIR="/home/shannon/Workspace/projects/ozbargainer"
+PROJECT_DIR="$(cd "$(dirname "$0")/.." && pwd)"
 CONTAINER_NAME="ozbargain-monitor"
 DB_PATH_IN_CONTAINER="/app/ozbargain.db"
 BACKUP_PATH_IN_CONTAINER="/app/backups" # Mapped to ./backups on host

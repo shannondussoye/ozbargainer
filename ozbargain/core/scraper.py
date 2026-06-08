@@ -1,6 +1,7 @@
 import re
 import requests
-from datetime import datetime
+from datetime import datetime, timezone
+from zoneinfo import ZoneInfo
 import random
 import time
 from typing import Optional
@@ -148,8 +149,8 @@ class FastScraper:
                 is_expired=is_expired,
                 linked_comment=linked_comment,
                 linked_comment_id=linked_comment_id,
-                timestamp=datetime.now(),
-                time_str=datetime.now().strftime("%H:%M"),
+                timestamp=datetime.now(timezone.utc),
+                time_str=datetime.now(timezone.utc).astimezone(ZoneInfo("Australia/Sydney")).strftime("%H:%M"),
                 user="Unknown",
                 action="scraped",
                 type="deal",

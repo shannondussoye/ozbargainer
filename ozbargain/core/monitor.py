@@ -4,7 +4,7 @@ import re
 import random
 import requests
 from contextlib import contextmanager
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from typing import Dict, Optional, Tuple
 from playwright.sync_api import sync_playwright, Page
 from .scraper import BrowserScraper, BOT_WALL_TITLES
@@ -139,7 +139,7 @@ class LiveMonitor:
 
     def parse_relative_time(self, time_str: str) -> datetime:
         try:
-            now = datetime.now()
+            now = datetime.now(timezone.utc)
             time_str = time_str.strip().lower()
 
             if "now" in time_str:
@@ -165,7 +165,7 @@ class LiveMonitor:
             return now - delta
         except Exception as e:
             logger.warning("Failed to parse relative time %s, using current time: %s", time_str, e)
-            return datetime.now()
+            return datetime.now(timezone.utc)
 
     def ping_healthcheck(self) -> None:
         """Sends a heartbeat to Healthchecks.io if configured."""
@@ -266,7 +266,7 @@ class LiveMonitor:
             cooldown_key = f"title/{title[:50]}"
 
         last_scraped = self.last_scraped_times.get(cooldown_key)
-        now_time = datetime.now()
+        now_time = datetime.now(timezone.utc)
 
         if last_scraped and (now_time - last_scraped).total_seconds() < self.scrape_cooldown:
             if random.random() < 0.1:  # 10% chance to log skip to avoid spam
@@ -332,29 +332,29 @@ class LiveMonitor:
     def _poll_loop(self, browser, page) -> None:
         """Polls the /live page until the session needs a refresh or a shutdown is requested."""
         logger.info("Listening for updates...")
-        last_trending_check = datetime.now() - timedelta(minutes=self.trending_check_interval)
-        last_success_time = datetime.now()
-        session_start_time = datetime.now()
+        last_trending_check = datetime.now(timezone.utc) - timedelta(minutes=self.trending_check_interval)
+        last_success_time = datetime.now(timezone.utc)
+        session_start_time = datetime.now(timezone.utc)
 
         while not self._shutdown:
             # Periodic session refresh (every 4 hours)
-            if datetime.now() - session_start_time > timedelta(hours=4):
+            if datetime.now(timezone.utc) - session_start_time > timedelta(hours=4):
                 logger.info("Periodic session refresh (4h limit reached).")
                 break
 
             try:
                 # --- Trending Check ---
-                if datetime.now() - last_trending_check > timedelta(minutes=self.trending_check_interval):
+                if datetime.now(timezone.utc) - last_trending_check > timedelta(minutes=self.trending_check_interval):
                     self._check_and_alert_trending()
-                    last_trending_check = datetime.now()
+                    last_trending_check = datetime.now(timezone.utc)
 
                 # --- Deal Stream Check ---
                 rows = page.locator("tbody#livebody tr").all()
 
                 # Stale Session Detection
                 if rows:
-                    last_success_time = datetime.now()
-                elif datetime.now() - last_success_time > timedelta(minutes=10):
+                    last_success_time = datetime.now(timezone.utc)
+                elif datetime.now(timezone.utc) - last_success_time > timedelta(minutes=10):
                     logger.warning(
                         "No rows seen for 10 minutes. Session may be stale/blocked. Restarting..."
                     )
@@ -391,7 +391,7 @@ class LiveMonitor:
 
                 # --- Housekeeping ---
                 if len(self.last_scraped_times) > 1000:
-                    cutoff = datetime.now() - timedelta(hours=1)
+                    cutoff = datetime.now(timezone.utc) - timedelta(hours=1)
                     self.last_scraped_times = {
                         k: v for k, v in self.last_scraped_times.items() if v > cutoff
                     }

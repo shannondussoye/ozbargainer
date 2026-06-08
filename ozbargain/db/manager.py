@@ -1,7 +1,7 @@
 import sqlite3
 import json
 from contextlib import contextmanager
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Dict, Iterator, List, Optional
 from ..utils.logger import setup_logger
 from ..config import settings
@@ -49,7 +49,7 @@ class StorageManager:
             # Serialize tags to JSON array
             tags_str = json.dumps(deal.tags) if isinstance(deal.tags, list) else json.dumps([])
 
-            now_ts = datetime.now()
+            now_ts = datetime.now(timezone.utc)
 
             # 1. Fetch current state to check for "Data Integrity Guard"
             cursor.execute("SELECT upvotes, comment_count FROM live_deals WHERE resolved_id = ?", (resolved_id,))
@@ -194,6 +194,17 @@ class StorageManager:
 
             return row[0] if row else None
 
+    def get_noisy_records(self) -> List[Dict]:
+        """Returns records with missing/noisy titles (e.g. www.ozbargain.com.au or empty)."""
+        with self._get_connection() as conn:
+            conn.row_factory = sqlite3.Row
+            cursor = conn.cursor()
+            cursor.execute(
+                "SELECT resolved_id, resolved_url FROM live_deals WHERE title = 'www.ozbargain.com.au' OR title = '' OR title IS NULL"
+            )
+            rows = cursor.fetchall()
+            return [dict(row) for row in rows]
+
     # --- Config Methods ---
 
     def add_watched_tag(self, tag: str):
@@ -237,7 +248,7 @@ class StorageManager:
             try:
                 cursor.execute(
                     "INSERT OR IGNORE INTO alert_history (deal_id, alert_type, timestamp) VALUES (?, ?, ?)",
-                    (deal_id, alert_type, datetime.now()),
+                    (deal_id, alert_type, datetime.now(timezone.utc)),
                 )
                 conn.commit()
             except Exception as e:
@@ -257,7 +268,7 @@ class StorageManager:
                     INSERT OR REPLACE INTO user_activity (user_id, deal_id, activity_ref, content, activity_type, timestamp)
                     VALUES (?, ?, ?, ?, ?, ?)
                 """,
-                    (user_id, deal_id, activity_ref, content, activity_type, datetime.now()),
+                    (user_id, deal_id, activity_ref, content, activity_type, datetime.now(timezone.utc)),
                 )
                 conn.commit()
             except Exception as e:
