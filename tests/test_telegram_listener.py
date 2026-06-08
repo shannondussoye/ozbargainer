@@ -1,5 +1,5 @@
 import pytest
-from unittest.mock import MagicMock, patch
+from unittest.mock import MagicMock
 from ozbargain.db.manager import StorageManager
 from ozbargain.notifier.telegram import TelegramNotifier, TelegramListener
 
