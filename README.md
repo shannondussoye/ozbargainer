@@ -2,7 +2,20 @@
 
 A robust Python-based toolkit for monitoring live deals on [OzBargain](https://www.ozbargain.com.au), tracking trend velocity, and automating user activity archiving.
 
-## 🏗 Architecture
+---
+
+## ✨ Features
+
+- **Real-Time Monitoring**: Automatically scans the `/live` feed to ingest new events, votes, and comments.
+- **Bot-Wall Resilience**: Specialized Hybrid Resolution bypasses Cloudflare challenges using metadata fallbacks and native CDP connections.
+- **Smart Cooldown & Deduplication**: Throttles crawls by Node ID and Deal Title to prevent redundant requests and avoid detection.
+- **Interactive Telegram Bot**: Supports real-time deal alerts and inbound tag management (view, add, remove watched tags).
+- **Data Integrity Guard**: Prevents zeroing out popularity scores if a Cloudflare challenge block is encountered.
+- **Observability Integration**: Out-of-the-box support for Healthchecks.io (heartbeats), Logtail (remote logging), and ntfy alerts.
+
+---
+
+## 🏗 System Architecture
 
 The system is organized into a modular Python package (`ozbargain`) designed for scalability and containerization.
 
@@ -11,13 +24,14 @@ graph TD
     subgraph "Scraper Package (ozbargain)"
         M["core/monitor.py (Live Feed)"] --> S["core/scraper.py (Data Extraction)"]
         M --> DB["db/manager.py (Storage)"]
-        M --> T["notifier/telegram.py (Alerts)"]
+        M --> T["notifier/telegram.py (Alerts & Listener)"]
     end
 
     subgraph "Infrastructure"
         DB --> SL[(SQLite - ozbargain.db)]
         M -.-> Docker[Docker Container]
     end
+
     subgraph "External Integration"
         S --> OZ["OzBargain.com.au"]
         T --> TG["Telegram Bot API"]
@@ -36,46 +50,29 @@ graph TD
 ```
 
 ### Key Components
-* **`ozbargain.core.monitor`**: The heartbeat of the system. Watches the `/live` feed, detects new events, and orchestrates scraping and alerting.
-    * **Smart Cooldown**: Consolidates re-scrapes by Node ID and Deal Title. Prevents redundant scrapes when multiple comments or votes arrive for the same deal within a 2-minute window.
-    * **Timeout Optimization**: Uses a aggressive 15-second timeout for individual deal scrapes, ensuring the live feed remains responsive even during OzBargain slowness or bot-wall challenges.
-    * **Native CDP Support**: Connects directly to a host Chrome instance via Chrome DevTools Protocol (CDP) for high performance and better bot-wall resilience.
-    * **Stale Session Detection**: Automatically detects when the `/live` feed becomes unresponsive or empty for more than 10 minutes and forces a session restart.
-    * **Periodic Session Refresh**: Automatically refreshes the browser environment every 4 hours to prevent memory leaks and maintain long-term stability.
 
-    * **Real-Time Score Tracking**: Processes individual `Vote Up` and `New comment` events from the live feed to trigger re-scrapes.
-    * **Scrape Rate Limiting**: Employs a smart 2-minute cooldown per URL to avoid Cloudflare bot-wall blocks.
-
-* **`ozbargain.core.scraper`**: Handles the heavy lifting of parsing OzBargain. Features include:
-    * **Bot-Wall Resilience**: Specialized logic to handle Cloudflare security challenges.
-    * **Metadata Fallback**: Uses live-row data when direct page scraping is restricted.
-    * **Context Awareness**: Resolves comment links back to their parent deal nodes.
-* **`ozbargain.db.manager`**: Centralized SQLite state management. Features a **Data Integrity Guard** to prevent Cloudflare blocks from overwriting high popularity scores with zeros. Tracks snapshots for trending analytics and maintains the alert history.
-* **`ozbargain.notifier.telegram`**: Dispatcher for real-time deal alerts.
-* **`ozbargain.utils.logger`**: Professional dual-sink logging utility.
-    * **Human Sink**: Formatted stdout for terminal debugging.
-    * **Machine Sink**: JSON-lines in `logs/monitor.log` for programmatic analysis.
-    * **Remote Sink**: Real-time structured log streaming to Logtail.
-* **`Health Monitoring`**: Integrated dead-man's switch via Healthchecks.io. Sends a non-blocking pulse after every successful poll cycle to detect hung processes.
-
----
-
-## 🤖 OzBargain Data Agent
-The project includes an AI "Data Agent" skill located at `.agents/skills/ozbargain_data_agent.md`. You can ask this AI agent to:
-* **"Give me a health check"**: Returns a report on deals tracked, alerts sent, active/expired ratios, and Data Integrity Guard hits.
-* **"Why didn't node/12345 alert?"**: Audits a specific deal, checking its heat score, expiry status, and snapshot trajectory against business rules.
-* **"What are the top trending deals?"**: Lists the hottest active deals currently in the database.
+- **`ozbargain.core.monitor`**: The heartbeat of the system.
+  - Watches `/live` for deal, vote, and comment events.
+  - Enforces a 15-second timeout for scrapers to prevent hanging.
+  - Detects stale web sessions and triggers a refresh every 4 hours.
+- **`ozbargain.core.scraper`**: Handles HTML parsing and Cloudflare Turnstile detection.
+- **`ozbargain.db.manager`**: Manages SQLite transactions, records trend velocity snapshots, and cleans up historical snapshots.
+- **`ozbargain.notifier.telegram`**: Sends outgoing alerts and manages incoming tags command listener.
+- **`ozbargain.utils.logger`**: Structured JSON logging outputting to stdout, local log files, and Logtail.
 
 ---
 
 ## 🚀 Getting Started
 
 ### Prerequisites
-* Python 3.12+
-* Docker (Recommended for production)
+
+- Python 3.12+
+- Docker & Docker Compose (Recommended)
 
 ### Environment Configuration
-Create a `.env` file in the root:
+
+Create a `.env` file in the root directory:
+
 ```ini
 TELEGRAM_BOT_TOKEN="your_bot_token"
 TELEGRAM_CHAT_ID="your_chat_id"
@@ -83,81 +80,100 @@ MIN_HEAT_SCORE=60                # Threshold for trending alerts
 TRENDING_CHECK_INTERVAL=30       # Minutes between velocity scans
 POLL_INTERVAL=5                  # Seconds between feed polls
 
-# Observability
-LOGTAIL_SOURCE_TOKEN="your_token"       # Optional: Stream logs to Logtail
-HEALTHCHECK_PING_URL="https://hc-ping.com/uuid" # Optional: Pulse heartbeat
+# Observability (Optional)
+LOGTAIL_SOURCE_TOKEN="your_token"       # Stream logs to Logtail
+HEALTHCHECK_PING_URL="https://hc-ping.com/uuid" # Heartbeat URL
 ```
 
 ---
 
-## 🐳 Docker Deployment (Recommended)
+## 🐳 Deployment & Running
 
-### Hybrid Bridge (Stealth Mode)
-To bypass Cloudflare bot detection, use the `manage.sh` orchestrator. This runs a real Chrome instance on the host and the monitor connects via CDP automatically. Includes **Smart Cooldown** to consolidate scrapes and minimize detection.
+### Docker Deployment (Recommended)
 
-
-
+#### 1. Hybrid Bridge (Stealth Mode)
+Runs Google Chrome on the host machine to easily complete Cloudflare Turnstile challenges while containerizing the monitor.
 ```bash
-# Start host browser and docker monitor
+# Starts the host browser and monitor container
 make start
 ```
 
-### Standard Deployment
-Alternatively, you can run the container manually via docker compose:
+#### 2. Standard Deployment
+Runs the monitor inside Docker standalone.
 ```bash
-# Ensure CHROME_CDP_URL is set in your .env or exported if using CDP
+# Build and run container manually
 docker compose up -d --build
 ```
 
-### 3. Check Logs
+#### 3. View Logs
 ```bash
 make logs
 ```
 
----
+### Local Development
 
-## 🛠 Local Development
+#### 1. Installation
+Install dependencies using `uv` (deterministic package management):
+```bash
+uv pip sync requirements.lock
+uv run playwright install chromium
+```
 
-### Installation
-1. Install dependencies using `uv` (deterministic builds):
-   ```bash
-   uv pip sync requirements.lock
-   uv run playwright install chromium
-   ```
+#### 2. Run Monitor Locally
+```bash
+export PYTHONPATH=$PYTHONPATH:.
+python3 -m ozbargain.core.monitor
+```
 
-2. Run the monitor (from the project root):
-   ```bash
-   export PYTHONPATH=$PYTHONPATH:.
-   python3 -m ozbargain.core.monitor
-   ```
-
-### Running Tests
-We use `pytest` for validating core logic (e.g., Data Integrity Guard and HTML parsing). Run the suite via the Makefile:
+#### 3. Run Test Suite
+Verify parser logic and database integrity rules:
 ```bash
 make test
 ```
 
 ---
 
-## 🧹 Maintenance Scripts
+## 💬 Telegram Command Interface
 
-Useful utilities located in the `scripts/` directory:
+The bot includes an inbound listener enabling tag configuration directly from Telegram.
 
-* **Fetch User Activity**: Scrape a specific user archive.
+| Command | Description | Example |
+| :--- | :--- | :--- |
+| `/tags` | List all active watched tags | `/tags` |
+| `/watch <tag>` | Add a tag to the watch list | `/watch laptop` |
+| `/unwatch <tag>` | Remove a tag from the watch list | `/unwatch laptop` |
+| `/help` | Display list of commands | `/help` |
+
+> [!IMPORTANT]
+> **Access Security**: The listener filters all updates strictly against the configured `TELEGRAM_CHAT_ID`. Messages from unauthorized users will be ignored and logged.
+
+---
+
+## 🧹 Maintenance Utilities
+
+Helper scripts are available in the `scripts/` directory:
+
+- **Fetch User Activity**: Scrape user archives.
   ```bash
   python3 -m scripts.fetch_user_activity --username <name>
   ```
-* **Cleanup Database**: Purge or fix inconsistent records.
+- **Cleanup Database**: Delete or repair inconsistent records.
   ```bash
   python3 -m scripts.cleanup_db
   ```
 
 ---
 
-## 🛡 Security & Anti-Bot
-OzBargain employs aggressive security verification (Cloudflare Turnstile). This scraper implements a **Hybrid Resolution** strategy:
-1. If a direct scrape is blocked, it resolves the event using metadata captured from the Live Feed row.
-2. For comments, it automatically looks up the parent deal in the database to ensure data integrity.
+## 🛡 Security & Anti-Bot Strategy
 
-### CDP Security (Priority 1)
-When running the `manage.sh` Hybrid Bridge mode, the host Google Chrome instance exposes its Remote Debugging Port via CDP. To prevent local network Remote Code Execution (RCE) vulnerabilities, the script explicitly binds the CDP socket to the `127.0.0.1` loopback interface. The Python container securely communicates with the host over this isolated loopback using Docker's `host` networking.
+1. **Hybrid Resolution**: If direct page scraping fails, it falls back to the metadata parsed directly from the live feed rows. Comments automatically resolve back to their parent deal node IDs to maintain database integrity.
+2. **CDP Port Isolation**: When running the Hybrid Bridge (`manage.sh`), the host's Chrome instance binds its remote debugging port strictly to the loopback interface (`127.0.0.1`), allowing only the local container to connect.
+
+---
+
+## 🤖 OzBargain Data Agent
+
+The repository contains a custom AI "Data Agent" skill located in `.agents/skills/ozbargain_data_agent.md`. You can ask the AI agent to:
+- **"Give me a health check"** — Reports active/expired ratios, database sizing, and metrics.
+- **"Why didn't node/12345 alert?"** — Audits why a specific deal did or didn't alert based on popularity history.
+- **"What are the top trending deals?"** — Lists current trending deals ordered by heat score.
