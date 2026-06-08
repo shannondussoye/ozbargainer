@@ -1,24 +1,24 @@
 import signal
 import time
-from playwright.sync_api import sync_playwright
-from .scraper import BrowserScraper, BOT_WALL_TITLES
-from ..db.manager import StorageManager
-from ..notifier.telegram import TelegramNotifier
-from datetime import datetime, timedelta
 import re
 import random
 import requests
+from contextlib import contextmanager
+from datetime import datetime, timedelta
 from typing import Dict, Optional, Tuple
-from ..utils.logger import setup_logger
-
+from playwright.sync_api import sync_playwright, Page
+from .scraper import BrowserScraper, BOT_WALL_TITLES
+from ..db.manager import StorageManager
+from ..notifier.telegram import TelegramNotifier
 from ..config import settings
 from ..utils.urls import normalize_deal_url
+from ..utils.logger import setup_logger
 
 logger = setup_logger("monitor")
 
 
 class LiveMonitor:
-    def __init__(self):
+    def __init__(self) -> None:
         self.db = StorageManager()
         self.cdp_url = settings.chrome_cdp_url
         self.scraper = BrowserScraper(headless=True, cdp_url=self.cdp_url)
@@ -137,7 +137,7 @@ class LiveMonitor:
 
         return deal_id, deal.url
 
-    def parse_relative_time(self, time_str):
+    def parse_relative_time(self, time_str: str) -> datetime:
         try:
             now = datetime.now()
             time_str = time_str.strip().lower()
@@ -163,10 +163,11 @@ class LiveMonitor:
                 delta = timedelta(days=val)
 
             return now - delta
-        except Exception:
+        except Exception as e:
+            logger.warning("Failed to parse relative time %s, using current time: %s", time_str, e)
             return datetime.now()
 
-    def ping_healthcheck(self):
+    def ping_healthcheck(self) -> None:
         """Sends a heartbeat to Healthchecks.io if configured."""
         if not self.healthcheck_url:
             return
@@ -175,218 +176,249 @@ class LiveMonitor:
         except Exception as e:
             logger.error("Healthcheck ping failed: %s", e)
 
-    def run(self):
-        logger.info("Starting Live Monitor...", extra={"event_type": "startup"})
+    def _setup_live_filters(self, page: Page) -> None:
+        """Configures the /live feed filters using page evaluation."""
+        logger.info("Configuring filters...")
+        filter_script = """
+            () => {
+                function setFilterByText(text, desiredState) {
+                    const labels = Array.from(document.querySelectorAll('label'));
+                    const label = labels.find(l => l.innerText.trim() === text);
+                    if (label) {
+                        const input = label.querySelector('input');
+                        if (input && input.checked !== desiredState) {
+                            input.click();
+                        }
+                    }
+                }
+                setFilterByText('Wiki', false);
+                const typeHeader = Array.from(document.querySelectorAll('#filters a'))
+                                       .find(a => a.innerText.includes('Type'));
+                if (typeHeader) typeHeader.click();
+            }
+        """
+        page.evaluate(filter_script)
+        page.wait_for_timeout(1000)
+
+        type_script = """
+            () => {
+                function setFilterByText(text, desiredState) {
+                    const labels = Array.from(document.querySelectorAll('label'));
+                    const label = labels.find(l => l.innerText.trim() === text);
+                    if (label) {
+                        const input = label.querySelector('input');
+                        if (input && input.checked !== desiredState) {
+                            input.click();
+                        }
+                    }
+                }
+                setFilterByText('Comp', false);
+                setFilterByText('Forum', false);
+                setFilterByText('Deal', true);
+            }
+        """
+        page.evaluate(type_script)
+        page.wait_for_timeout(500)
+        logger.info("Filters configured.")
+
+    def _parse_live_row(self, row) -> Optional[Dict]:
+        """Parses a single live feed row into event data, or None if filtered out."""
+        try:
+            type_str = (row.locator("td:nth-child(5)").text_content() or "").strip()
+            if type_str != "Deal":
+                return None
+
+            subject_link_el = row.locator("td:nth-child(4) a")
+            if subject_link_el.count() == 0:
+                return None
+            raw_url = subject_link_el.get_attribute("href") or ""
+            url = normalize_deal_url(raw_url)
+            title_text = (subject_link_el.text_content() or "").strip()
+
+            time_str = (row.locator("td:nth-child(1)").text_content() or "").strip()
+            user_str = (row.locator("td:nth-child(2)").text_content() or "").strip()
+            action_el = row.locator("td:nth-child(3) i")
+            action_str = action_el.get_attribute("title") or "Unknown"
+
+            timestamp = self.parse_relative_time(time_str).isoformat()
+
+            return {
+                "title": title_text,
+                "original_url": url,
+                "timestamp": timestamp,
+                "time_str": time_str,
+                "user": user_str,
+                "action": action_str,
+                "type": type_str,
+            }
+        except Exception as e:
+            logger.debug("Failed to parse row: %s", e)
+            return None
+
+    def _should_scrape(self, url: str, title: str) -> bool:
+        """Returns True if the URL has not been scraped recently."""
+        cooldown_key = url
+        if "/node/" in url:
+            node_match = re.search(r"node/(\d+)", url)
+            if node_match:
+                cooldown_key = f"node/{node_match.group(1)}"
+        elif "/comment/" in url:
+            cooldown_key = f"title/{title[:50]}"
+
+        last_scraped = self.last_scraped_times.get(cooldown_key)
+        now_time = datetime.now()
+
+        if last_scraped and (now_time - last_scraped).total_seconds() < self.scrape_cooldown:
+            if random.random() < 0.1:  # 10% chance to log skip to avoid spam
+                logger.info("Skip re-scrape (Cooldown): %s", cooldown_key)
+            return False
+
+        self.last_scraped_times[cooldown_key] = now_time
+        return True
+
+    def _check_and_alert_trending(self) -> None:
+        """Performs scheduled trending deals check and sends alerts."""
+        logger.info("Performing scheduled trending deals check...")
+        candidates = self.db.get_trending_deals(
+            hours=24, limit=-1, min_score=self.min_heat_score
+        )
+
+        for deal in candidates:
+            deal_id = deal["resolved_id"]
+            if not self.db.has_alerted(deal_id, "trending"):
+                deal_link = f"{settings.ozbargain_base_url}/{deal_id}"
+                msg = (
+                    f"<b>🔥 POPULAR DEAL!</b> (Score: {deal['heat_score']})\n\n"
+                    f"<a href='{deal_link}'>{deal['title']}</a>\n"
+                    f"<b>Price:</b> {deal['price']}\n"
+                    f"<b>Votes:</b> {deal['upvotes']} | <b>Comments:</b> {deal['comment_count']}"
+                )
+
+                if self.notifier.send_message(msg, priority=False):
+                    self.db.log_alert(deal_id, "trending")
+                    logger.info(
+                        "Sent Trending Alert: %s",
+                        deal["title"],
+                        extra={"event_type": "notification", "priority": "normal"},
+                    )
+                else:
+                    logger.error("Failed to send Trending Alert: %s", deal["title"])
+
+    @contextmanager
+    def _browser_session(self):
+        """Context manager to initialize and close playwright browser page session."""
+        logger.info("Initializing browser session...")
+        with sync_playwright() as p:
+            if self.cdp_url:
+                logger.info("Connecting to Chrome via CDP: %s", self.cdp_url)
+                try:
+                    browser = p.chromium.connect_over_cdp(self.cdp_url)
+                except Exception as cdp_e:
+                    logger.warning("CDP Connection failed: %s. Falling back to local browser.", cdp_e)
+                    browser = p.chromium.launch(headless=True)
+            else:
+                logger.info("Launching local browser...")
+                browser = p.chromium.launch(headless=True)
+
+            try:
+                page = browser.new_page()
+                logger.info("Navigating to /live...")
+                page.goto(f"{settings.ozbargain_base_url}/live", timeout=60000, wait_until="domcontentloaded")
+                page.wait_for_selector("tbody#livebody", timeout=30000)
+                yield browser, page
+            finally:
+                browser.close()
+
+    def _poll_loop(self, browser, page) -> None:
+        """Polls the /live page until the session needs a refresh or a shutdown is requested."""
+        logger.info("Listening for updates...")
         last_trending_check = datetime.now() - timedelta(minutes=self.trending_check_interval)
+        last_success_time = datetime.now()
+        session_start_time = datetime.now()
 
         while not self._shutdown:
-            logger.info("Initializing browser session...")
+            # Periodic session refresh (every 4 hours)
+            if datetime.now() - session_start_time > timedelta(hours=4):
+                logger.info("Periodic session refresh (4h limit reached).")
+                break
+
             try:
-                with sync_playwright() as p:
-                    if self.cdp_url:
-                        logger.info("Connecting to Chrome via CDP: %s", self.cdp_url)
-                        try:
-                            browser = p.chromium.connect_over_cdp(self.cdp_url)
-                        except Exception as cdp_e:
-                            logger.warning("CDP Connection failed: %s. Falling back to local browser.", cdp_e)
-                            browser = p.chromium.launch(headless=True)
-                    else:
-                        logger.info("Launching local browser...")
-                        browser = p.chromium.launch(headless=True)
+                # --- Trending Check ---
+                if datetime.now() - last_trending_check > timedelta(minutes=self.trending_check_interval):
+                    self._check_and_alert_trending()
+                    last_trending_check = datetime.now()
 
-                    page = browser.new_page()
+                # --- Deal Stream Check ---
+                rows = page.locator("tbody#livebody tr").all()
 
-                    logger.info("Navigating to /live...")
-                    page.goto(f"{settings.ozbargain_base_url}/live", timeout=60000, wait_until="domcontentloaded")
-                    page.wait_for_selector("tbody#livebody", timeout=30000)
-
-                    # Setup Filters: Uncheck Wiki
-                    logger.info("Configuring filters...")
-                    filter_script = """
-                        () => {
-                            function setFilterByText(text, desiredState) {
-                                const labels = Array.from(document.querySelectorAll('label'));
-                                const label = labels.find(l => l.innerText.trim() === text);
-                                if (label) {
-                                    const input = label.querySelector('input');
-                                    if (input && input.checked !== desiredState) {
-                                        input.click();
-                                    }
-                                }
-                            }
-                            setFilterByText('Wiki', false);
-                            const typeHeader = Array.from(document.querySelectorAll('#filters a'))
-                                                   .find(a => a.innerText.includes('Type'));
-                            if (typeHeader) typeHeader.click();
-                        }
-                    """
-                    page.evaluate(filter_script)
-                    page.wait_for_timeout(1000)
-
-                    type_script = """
-                        () => {
-                            function setFilterByText(text, desiredState) {
-                                const labels = Array.from(document.querySelectorAll('label'));
-                                const label = labels.find(l => l.innerText.trim() === text);
-                                if (label) {
-                                    const input = label.querySelector('input');
-                                    if (input && input.checked !== desiredState) {
-                                        input.click();
-                                    }
-                                }
-                            }
-                            setFilterByText('Comp', false);
-                            setFilterByText('Forum', false);
-                            setFilterByText('Deal', true);
-                        }
-                    """
-                    page.evaluate(type_script)
-                    page.wait_for_timeout(500)
-
-                    logger.info("Filters configured. Listening for updates...")
-
+                # Stale Session Detection
+                if rows:
                     last_success_time = datetime.now()
-                    session_start_time = datetime.now()
+                elif datetime.now() - last_success_time > timedelta(minutes=10):
+                    logger.warning(
+                        "No rows seen for 10 minutes. Session may be stale/blocked. Restarting..."
+                    )
+                    break
 
-                    while not self._shutdown:
-                        # Periodic session refresh (every 4 hours)
-                        if datetime.now() - session_start_time > timedelta(hours=4):
-                            logger.info("Periodic session refresh (4h limit reached).")
-                            break
+                recent_rows = rows[:20]
+                for row in recent_rows:
+                    try:
+                        event_data = self._parse_live_row(row)
+                        if not event_data:
+                            continue
 
-                        try:
-                            # --- Trending Check ---
-                            if datetime.now() - last_trending_check > timedelta(minutes=self.trending_check_interval):
-                                logger.info("Performing scheduled trending deals check...")
-                                last_trending_check = datetime.now()
-                                candidates = self.db.get_trending_deals(
-                                    hours=24, limit=-1, min_score=self.min_heat_score
-                                )
+                        url = event_data["original_url"]
+                        title_text = event_data["title"]
+                        time_str = event_data["time_str"]
+                        user_str = event_data["user"]
+                        action_str = event_data["action"]
 
-                                for deal in candidates:
-                                    deal_id = deal["resolved_id"]
-                                    if not self.db.has_alerted(deal_id, "trending"):
-                                        deal_link = f"{settings.ozbargain_base_url}/{deal_id}"
-                                        msg = (
-                                            f"<b>🔥 POPULAR DEAL!</b> (Score: {deal['heat_score']})\n\n"
-                                            f"<a href='{deal_link}'>{deal['title']}</a>\n"
-                                            f"<b>Price:</b> {deal['price']}\n"
-                                            f"<b>Votes:</b> {deal['upvotes']} | <b>Comments:</b> {deal['comment_count']}"
-                                        )
+                        # Track unique /live rows by composite key
+                        row_key = f"{time_str}|{user_str}|{action_str}|{url}"
+                        if row_key in self.seen_rows:
+                            continue
+                        self.seen_rows.add(row_key)
 
-                                        if self.notifier.send_message(msg, priority=False):
-                                            self.db.log_alert(deal_id, "trending")
-                                            logger.info(
-                                                "Sent Trending Alert: %s",
-                                                deal["title"],
-                                                extra={"event_type": "notification", "priority": "normal"},
-                                            )
-                                        else:
-                                            logger.error("Failed to send Trending Alert: %s", deal["title"])
+                        if not self._should_scrape(url, title_text):
+                            continue
 
-                            # --- Deal Stream Check ---
-                            rows = page.locator("tbody#livebody tr").all()
+                        self.process_deal(url, browser=browser, event_data=event_data, timeout=15000)
 
-                            # Stale Session Detection
-                            if rows:
-                                last_success_time = datetime.now()
-                            elif datetime.now() - last_success_time > timedelta(minutes=10):
-                                logger.warning(
-                                    "No rows seen for 10 minutes. Session may be stale/blocked. Restarting..."
-                                )
-                                break
+                    except Exception as e:
+                        if "Target page, context or browser has been closed" in str(e):
+                            raise e
+                        logger.error("Row processing error: %s", e)
 
-                            recent_rows = rows[:20]
-                            for row in recent_rows:
-                                try:
-                                    type_str = (row.locator("td:nth-child(5)").text_content() or "").strip()
-                                    if type_str != "Deal":
-                                        continue
+                # --- Housekeeping ---
+                if len(self.last_scraped_times) > 1000:
+                    cutoff = datetime.now() - timedelta(hours=1)
+                    self.last_scraped_times = {
+                        k: v for k, v in self.last_scraped_times.items() if v > cutoff
+                    }
 
-                                    subject_link_el = row.locator("td:nth-child(4) a")
-                                    if subject_link_el.count() == 0:
-                                        continue
-                                    raw_url = subject_link_el.get_attribute("href") or ""
-                                    url = normalize_deal_url(raw_url)
-                                    title_text = (subject_link_el.text_content() or "").strip()
+                if len(self.seen_rows) > 5000:
+                    self.seen_rows.clear()
+                    logger.info("Cleared seen_rows cache (exceeded 5000 entries)")
 
-                                    time_str = (row.locator("td:nth-child(1)").text_content() or "").strip()
-                                    user_str = (row.locator("td:nth-child(2)").text_content() or "").strip()
-                                    action_el = row.locator("td:nth-child(3) i")
-                                    action_str = action_el.get_attribute("title") or "Unknown"
+            except Exception as loop_e:
+                if "Target page, context or browser has been closed" in str(loop_e):
+                    raise loop_e
+                logger.error("Inner loop error: %s", loop_e)
 
-                                    # Track unique /live rows by composite key
-                                    row_key = f"{time_str}|{user_str}|{action_str}|{url}"
-                                    if row_key in self.seen_rows:
-                                        continue
-                                    self.seen_rows.add(row_key)
+            self.ping_healthcheck()
+            time.sleep(self.poll_interval)
 
-                                    timestamp = self.parse_relative_time(time_str).isoformat()
+    def run(self) -> None:
+        logger.info("Starting Live Monitor...", extra={"event_type": "startup"})
 
-                                    event_data = {
-                                        "title": title_text,
-                                        "original_url": url,
-                                        "timestamp": timestamp,
-                                        "time_str": time_str,
-                                        "user": user_str,
-                                        "action": action_str,
-                                        "type": type_str,
-                                    }
-
-                                    # --- Rate Limiting / Cooldown ---
-                                    now_time = datetime.now()
-                                    # Smart Cooldown: Use Node ID or Title to prevent re-scraping same deal via different events
-                                    cooldown_key = url
-                                    if "/node/" in url:
-                                        node_match = re.search(r"node/(\d+)", url)
-                                        if node_match:
-                                            cooldown_key = f"node/{node_match.group(1)}"
-                                    elif "/comment/" in url:
-                                        # For comments, use the title as a grouping key
-                                        # This prevents multiple comments on the same deal from triggering multiple scrapes
-                                        cooldown_key = f"title/{title_text[:50]}"
-
-                                    last_scraped = self.last_scraped_times.get(cooldown_key)
-
-                                    if (
-                                        last_scraped
-                                        and (now_time - last_scraped).total_seconds() < self.scrape_cooldown
-                                    ):
-                                        # Only log skip if it's a node/title ID or if we haven't logged it too much
-                                        if random.random() < 0.1:  # 10% chance to log skip to avoid spam
-                                            logger.info("Skip re-scrape (Cooldown): %s", cooldown_key)
-                                        continue
-
-                                    self.last_scraped_times[cooldown_key] = now_time
-                                    self.process_deal(url, browser=browser, event_data=event_data, timeout=15000)
-
-                                except Exception as e:
-                                    if "Target page, context or browser has been closed" in str(e):
-                                        raise e
-                                    logger.error("Row processing error: %s", e)
-
-                            # --- Housekeeping ---
-                            if len(self.last_scraped_times) > 1000:
-                                cutoff = datetime.now() - timedelta(hours=1)
-                                self.last_scraped_times = {
-                                    k: v for k, v in self.last_scraped_times.items() if v > cutoff
-                                }
-
-                            if len(self.seen_rows) > 5000:
-                                self.seen_rows.clear()
-                                logger.info("Cleared seen_rows cache (exceeded 5000 entries)")
-
-                        except Exception as loop_e:
-                            if "Target page, context or browser has been closed" in str(loop_e):
-                                raise loop_e
-                            logger.error("Inner loop error: %s", loop_e)
-
-                        self.ping_healthcheck()
-                        time.sleep(self.poll_interval)
-
-                    browser.close()
-
+        while not self._shutdown:
+            try:
+                with self._browser_session() as (browser, page):
+                    self._setup_live_filters(page)
+                    self._poll_loop(browser, page)
             except Exception as e:
+                if self._shutdown:
+                    break
                 logger.error("Fatal session error: %s", e)
                 logger.info("Restarting browser session in 15 seconds...")
                 time.sleep(15)
