@@ -37,6 +37,11 @@ def run_migrations(conn: sqlite3.Connection):
         )
     """)
 
+    # Indexes for fast trending queries and title resolution lookup
+    cursor.execute("CREATE INDEX IF NOT EXISTS idx_live_deals_timestamp_source ON live_deals(timestamp, source, is_expired)")
+    cursor.execute("CREATE INDEX IF NOT EXISTS idx_live_deals_title ON live_deals(title)")
+
+
     # Migration: Add is_expired if missing (for existing users)
     try:
         cursor.execute("ALTER TABLE live_deals ADD COLUMN is_expired BOOLEAN DEFAULT 0")
