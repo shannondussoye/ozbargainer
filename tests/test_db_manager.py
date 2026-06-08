@@ -172,3 +172,61 @@ def test_cleanup_snapshots(db):
     assert rows[0][0] == "node/302"
 
 
+def test_metadata_preservation_when_incoming_empty(db):
+    """
+    If a deal already exists in the database, and we upsert a new DealResult with empty/null
+    metadata fields (like description, tags, price, etc.), the existing values should be preserved.
+    """
+    import json
+    import sqlite3
+    deal_id = "node/555"
+
+    # 1. Insert full metadata
+    db.upsert_live_deal(
+        DealResult(
+            id=deal_id,
+            url=f"https://www.ozbargain.com.au/{deal_id}",
+            title="Sleek Laptop",
+            price="$999",
+            description="Super fast laptop.",
+            tags=["tech", "laptop"],
+            posted_date="08/06/2026 - 10:00",
+            external_domain="computerstore.com.au",
+            upvotes=15,
+            comment_count=5,
+        )
+    )
+
+    # 2. Upsert with empty/missing values (e.g. from comment scrape or block fallback)
+    db.upsert_live_deal(
+        DealResult(
+            id=deal_id,
+            url=f"https://www.ozbargain.com.au/{deal_id}",
+            title="",  # Empty/generic
+            price=None,
+            description=None,
+            tags=None,
+            posted_date=None,
+            external_domain=None,
+            upvotes=0,
+            comment_count=0,
+        )
+    )
+
+    # 3. Verify that metadata remains intact
+    with db._get_connection() as conn:
+        conn.row_factory = sqlite3.Row
+        cursor = conn.cursor()
+        cursor.execute("SELECT * FROM live_deals WHERE resolved_id = ?", (deal_id,))
+        row = dict(cursor.fetchone())
+
+    assert row["title"] == "Sleek Laptop"
+    assert row["price"] == "$999"
+    assert row["description"] == "Super fast laptop."
+    assert json.loads(row["tags"]) == ["tech", "laptop"]
+    assert row["posted_date"] == "08/06/2026 - 10:00"
+    assert row["external_domain"] == "computerstore.com.au"
+    assert row["upvotes"] == 15
+    assert row["comment_count"] == 5
+
+

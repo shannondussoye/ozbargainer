@@ -51,24 +51,78 @@ class StorageManager:
 
             now_ts = datetime.now(timezone.utc)
 
-            # 1. Fetch current state to check for "Data Integrity Guard"
-            cursor.execute("SELECT upvotes, comment_count FROM live_deals WHERE resolved_id = ?", (resolved_id,))
+            # 1. Fetch current state to check for "Data Integrity Guard" and metadata preservation
+            cursor.execute(
+                """
+                SELECT resolved_url, original_url, title, price, description, coupon_code, tags,
+                       upvotes, downvotes, comment_count, time_str, user, action, type, is_expired,
+                       posted_date, external_domain, source
+                FROM live_deals WHERE resolved_id = ?
+                """,
+                (resolved_id,)
+            )
             existing = cursor.fetchone()
 
             upvotes = deal.upvotes
             comment_count = deal.comment_count
 
-            # Data Integrity Guard:
-            # If scraper hits a bot-wall, it might return 0 upvotes/comments.
-            # If we already have higher numbers, keep them unless we explicitly want to "reset"
+            # Bot-wall indicator titles
+            bot_wall_titles = {"OzBargain", "www.ozbargain.com.au", "Performing security verification"}
+
             if existing:
-                orig_upvotes, orig_comments = existing
-                if upvotes == 0 and orig_upvotes > 0:
+                (
+                    orig_url, orig_orig_url, orig_title, orig_price, orig_desc, orig_coupon, orig_tags,
+                    orig_upvotes, orig_downvotes, orig_comments, orig_time_str, orig_user, orig_action, orig_type,
+                    orig_is_expired, orig_posted_date, orig_ext_domain, orig_source
+                ) = existing
+
+                # Merge logic: preserve existing values if incoming scraped data is empty/null/zero
+                title = deal.title if (deal.title and deal.title not in bot_wall_titles) else orig_title
+                price = deal.price if deal.price else orig_price
+                description = deal.description if deal.description else orig_desc
+                coupon_code = deal.coupon_code if deal.coupon_code else orig_coupon
+
+                if deal.tags and len(deal.tags) > 0:
+                    tags_str = json.dumps(deal.tags)
+                else:
+                    tags_str = orig_tags if orig_tags else json.dumps([])
+
+                if upvotes == 0 and orig_upvotes and orig_upvotes > 0:
                     logger.info("Preserving upvotes (%d) for %s (Incoming was 0)", orig_upvotes, resolved_id)
                     upvotes = orig_upvotes
-                if comment_count == 0 and orig_comments > 0:
+
+                downvotes = deal.downvotes if deal.downvotes is not None else orig_downvotes
+
+                if comment_count == 0 and orig_comments and orig_comments > 0:
                     logger.info("Preserving comment_count (%d) for %s (Incoming was 0)", orig_comments, resolved_id)
                     comment_count = orig_comments
+
+                time_str = deal.time_str if deal.time_str else orig_time_str
+                user = deal.user if (deal.user and deal.user != "Unknown") else orig_user
+                action = deal.action if deal.action else orig_action
+                type_ = deal.type if deal.type else orig_type
+                is_expired = (1 if deal.is_expired else 0) if deal.is_expired is not None else orig_is_expired
+                posted_date = deal.posted_date if deal.posted_date else orig_posted_date
+                external_domain = deal.external_domain if deal.external_domain else orig_ext_domain
+                resolved_url = resolved_url if resolved_url else orig_url
+                original_url = (deal.original_url or deal.url) if (deal.original_url or deal.url) else orig_orig_url
+                source_val = source if source else orig_source
+            else:
+                title = deal.title
+                price = deal.price
+                description = deal.description
+                coupon_code = deal.coupon_code
+                tags_str = json.dumps(deal.tags) if isinstance(deal.tags, list) else json.dumps([])
+                downvotes = deal.downvotes
+                time_str = deal.time_str
+                user = deal.user
+                action = deal.action
+                type_ = deal.type
+                is_expired = 1 if deal.is_expired else 0
+                posted_date = deal.posted_date
+                external_domain = deal.external_domain
+                original_url = deal.original_url or deal.url
+                source_val = source
 
             # 2. Upsert Current State
             cursor.execute(
@@ -84,24 +138,24 @@ class StorageManager:
                 (
                     resolved_id,
                     resolved_url,
-                    deal.original_url or deal.url,
-                    deal.title,
-                    deal.price,
-                    deal.description,
-                    deal.coupon_code,
+                    original_url,
+                    title,
+                    price,
+                    description,
+                    coupon_code,
                     tags_str,
                     upvotes,
-                    deal.downvotes,
+                    downvotes,
                     comment_count,
                     now_ts,
-                    deal.time_str,
-                    deal.user,
-                    deal.action,
-                    deal.type,
-                    1 if deal.is_expired else 0,
-                    deal.posted_date,
-                    deal.external_domain,
-                    source,
+                    time_str,
+                    user,
+                    action,
+                    type_,
+                    is_expired,
+                    posted_date,
+                    external_domain,
+                    source_val,
                 ),
             )
 

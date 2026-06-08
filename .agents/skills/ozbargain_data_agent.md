@@ -144,8 +144,8 @@ sqlite3 /home/shannon/workspace/ozbargain/ozbargain.db "SELECT COUNT(*) as expir
 # 5. Hottest unalerted ACTIVE deal
 sqlite3 /home/shannon/workspace/ozbargain/ozbargain.db "SELECT title, ((upvotes * 2) + comment_count) as heat_score, resolved_url FROM live_deals WHERE timestamp > datetime('now', '-24 hours') AND (is_expired = 0 OR is_expired IS NULL) AND source = 'live' AND resolved_id NOT IN (SELECT deal_id FROM alert_history) ORDER BY heat_score DESC LIMIT 1;"
 
-# 6. Deals where Integrity Guard may have been triggered (upvotes=0 in snapshots but live_deals has >0)
-sqlite3 /home/shannon/workspace/ozbargain/ozbargain.db "SELECT COUNT(DISTINCT deal_id) as integrity_saves FROM deal_snapshots WHERE upvotes = 0 AND comment_count = 0 AND timestamp > datetime('now', '-24 hours') AND deal_id IN (SELECT resolved_id FROM live_deals WHERE upvotes > 0);"
+# 6. Deals where Integrity Guard may have been triggered (excluding comment fallback records)
+sqlite3 /home/shannon/workspace/ozbargain/ozbargain.db "SELECT COUNT(DISTINCT deal_id) as integrity_saves FROM deal_snapshots WHERE upvotes = 0 AND comment_count = 0 AND timestamp > datetime('now', '-24 hours') AND deal_id LIKE 'node/%' AND deal_id IN (SELECT resolved_id FROM live_deals WHERE upvotes > 0);"
 ```
 
 ---
