@@ -71,7 +71,7 @@ The project includes an AI "Data Agent" skill located at `.agents/skills/ozbarga
 ## 🚀 Getting Started
 
 ### Prerequisites
-* Python 3.10+
+* Python 3.12+
 * Docker (Recommended for production)
 
 ### Environment Configuration
