@@ -421,7 +421,12 @@ class BrowserScraper:
 
             # Resolve parent deal page if we are on a comment page
             if "/comment/" in page.url or "/comment/" in url:
-                parent_link = page.locator("h2.title a, div.node h2 a, ul.breadcrumb a, a[href^='/node/'], a[href*='/node/']").first
+                parent_selector = "h2.title a, div.node h2 a, ul.breadcrumb a, a[href^='/node/'], a[href*='/node/']"
+                try:
+                    page.wait_for_selector(parent_selector, timeout=3000)
+                except Exception:
+                    pass
+                parent_link = page.locator(parent_selector).first
                 if parent_link.count() > 0:
                     parent_url = parent_link.get_attribute("href") or ""
                     if parent_url:
@@ -450,7 +455,7 @@ class BrowserScraper:
             elif "/comment/" in final_url:
                 # Attempt to find parent node link on the page
                 # Breadcrumbs or Title link Usually: div.node-full h1 a or h2.title a
-                parent_link = page.locator("h2.title a, div.node-full h1 a, ul.breadcrumb a").first
+                parent_link = page.locator("h2.title a, div.node h2 a, ul.breadcrumb a, a[href^='/node/'], a[href*='/node/']").first
                 if parent_link.count() > 0:
                     parent_url = parent_link.get_attribute("href") or ""
                     if "/node/" in parent_url:
