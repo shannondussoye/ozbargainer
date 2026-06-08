@@ -419,8 +419,33 @@ class BrowserScraper:
             # Wait for load - sometimes OzBargain has a "click to continue" or similar? usually not.
             page.wait_for_load_state("domcontentloaded")
 
+            # Resolve parent deal page if we are on a comment page
+            if "/comment/" in page.url or "/comment/" in url:
+                parent_selector = "h2.title a, div.node h2 a, ul.breadcrumb a, a[href^='/node/'], a[href*='/node/']"
+                try:
+                    page.wait_for_selector(parent_selector, timeout=3000)
+                except Exception:
+                    pass
+                parent_link = page.locator(parent_selector).first
+                if parent_link.count() > 0:
+                    parent_url = parent_link.get_attribute("href") or ""
+                    if parent_url:
+                        if parent_url.startswith("/"):
+                            parent_url = f"{settings.ozbargain_base_url}{parent_url}"
+                        logger.info("Resolving comment URL %s to parent deal URL %s", page.url, parent_url)
+                        page.goto(parent_url, wait_until="domcontentloaded")
+                        page.wait_for_load_state("domcontentloaded")
+                        url = parent_url
+
             # CANONICAL URL & ID RESOLUTION
             final_url = page.url
+            if "?" in final_url:
+                base, query = final_url.split("?", 1)
+                params = [p for p in query.split("&") if not p.startswith("__cf_") and not p.startswith("cf_")]
+                if params:
+                    final_url = f"{base}?{'&'.join(params)}"
+                else:
+                    final_url = base
 
             # Extract canonical ID
             deal_id = None
@@ -430,7 +455,7 @@ class BrowserScraper:
             elif "/comment/" in final_url:
                 # Attempt to find parent node link on the page
                 # Breadcrumbs or Title link Usually: div.node-full h1 a or h2.title a
-                parent_link = page.locator("h2.title a, div.node-full h1 a, ul.breadcrumb a").first
+                parent_link = page.locator("h2.title a, div.node h2 a, ul.breadcrumb a, a[href^='/node/'], a[href*='/node/']").first
                 if parent_link.count() > 0:
                     parent_url = parent_link.get_attribute("href") or ""
                     if "/node/" in parent_url:
@@ -442,7 +467,7 @@ class BrowserScraper:
 
                 # Fallback to comment ID if node not found
                 if not deal_id:
-                    parts = final_url.split("/comment/")[-1].split("/")[0]
+                    parts = final_url.split("/comment/")[-1].split("/")[0].split("?")[0].split("#")[0]
                     deal_id = f"comment/{parts}"
             else:
                 deal_id = final_url
@@ -493,14 +518,18 @@ class BrowserScraper:
                 result.is_expired = True
 
             # Post-Extraction Cleanup: Title Noise
-            if result.title in BOT_WALL_TITLES:
+            if not result.title or result.title in BOT_WALL_TITLES:
                 logger.warning(
-                    "Bot-wall detected", extra={"event_type": "security_challenge", "challenge_type": "cloudflare"}
+                    "Bot-wall or empty title detected", extra={"event_type": "security_challenge", "challenge_type": "cloudflare"}
                 )
                 # Attempt to extract from h2 if h1 was generic
                 h2_el = page.locator("h2").first
                 if h2_el.count() > 0:
                     result.title = (h2_el.text_content() or "").strip()
+
+                # If still empty or in BOT_WALL_TITLES, mark as error
+                if not result.title or result.title in BOT_WALL_TITLES:
+                    result.error = "Bot-wall block or empty page detected"
 
             # --- Posted Date & Domain ---
             submitted_loc = page.locator("div.submitted")
@@ -595,7 +624,9 @@ class BrowserScraper:
         Supports connecting via CDP if self.cdp_url is set.
         """
         if browser:
-            page = browser.new_page()
+            # Reuse active context (which shares cookies/session state) if available
+            context = browser.contexts[0] if hasattr(browser, "contexts") and browser.contexts else browser
+            page = context.new_page()
             try:
                 page.goto(url, timeout=timeout, wait_until="domcontentloaded")
                 return self._extract_deal_data(page, url)
