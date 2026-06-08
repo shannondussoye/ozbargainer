@@ -1,4 +1,4 @@
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 import pytest
 from unittest.mock import patch
 from ozbargain.core.monitor import LiveMonitor
@@ -15,37 +15,37 @@ def monitor():
 
 def test_parse_relative_time_now(monitor):
     res = monitor.parse_relative_time("now")
-    assert (datetime.now() - res).total_seconds() < 2
+    assert (datetime.now(timezone.utc) - res).total_seconds() < 2
 
 
 def test_parse_relative_time_minutes(monitor):
     res = monitor.parse_relative_time("5 min ago")
-    expected = datetime.now() - timedelta(minutes=5)
+    expected = datetime.now(timezone.utc) - timedelta(minutes=5)
     assert abs((expected - res).total_seconds()) < 2
 
 
 def test_parse_relative_time_hours(monitor):
     res = monitor.parse_relative_time("2 hours ago")
-    expected = datetime.now() - timedelta(hours=2)
+    expected = datetime.now(timezone.utc) - timedelta(hours=2)
     assert abs((expected - res).total_seconds()) < 2
 
 
 def test_parse_relative_time_days(monitor):
     res = monitor.parse_relative_time("3 days ago")
-    expected = datetime.now() - timedelta(days=3)
+    expected = datetime.now(timezone.utc) - timedelta(days=3)
     assert abs((expected - res).total_seconds()) < 2
 
 
 def test_parse_relative_time_seconds(monitor):
     res = monitor.parse_relative_time("30 sec ago")
-    expected = datetime.now() - timedelta(seconds=30)
+    expected = datetime.now(timezone.utc) - timedelta(seconds=30)
     assert abs((expected - res).total_seconds()) < 2
 
 
 def test_parse_relative_time_malformed(monitor):
     # Should fallback to now
     res = monitor.parse_relative_time("weird_string")
-    assert (datetime.now() - res).total_seconds() < 2
+    assert (datetime.now(timezone.utc) - res).total_seconds() < 2
 
 
 def test_should_scrape_cooldown(monitor):
@@ -59,7 +59,7 @@ def test_should_scrape_cooldown(monitor):
     assert monitor._should_scrape(url, "Test Title") is False
 
     # Mock time passing by setting the stored time in last_scraped_times back by 11 seconds
-    monitor.last_scraped_times["node/123"] = datetime.now() - timedelta(seconds=11)
+    monitor.last_scraped_times["node/123"] = datetime.now(timezone.utc) - timedelta(seconds=11)
 
     # Now it should be allowed again
     assert monitor._should_scrape(url, "Test Title") is True

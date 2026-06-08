@@ -11,8 +11,8 @@ def monitor_integration(tmp_path):
     db_manager = StorageManager(db_path=str(db_file))
 
     with patch("ozbargain.core.monitor.StorageManager", return_value=db_manager), \
-         patch("ozbargain.core.monitor.BrowserScraper") as mock_scraper_cls, \
-         patch("ozbargain.core.monitor.TelegramNotifier") as mock_notifier_cls:
+         patch("ozbargain.core.monitor.BrowserScraper"), \
+         patch("ozbargain.core.monitor.TelegramNotifier"):
 
         monitor_instance = LiveMonitor()
         yield monitor_instance, db_manager, monitor_instance.scraper, monitor_instance.notifier

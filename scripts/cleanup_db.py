@@ -8,27 +8,21 @@ def recover_data():
     db = StorageManager()
     scraper = BrowserScraper(headless=True)
 
-    conn = db._get_connection()
-    cursor = conn.cursor()
-
-    # Find records with "www.ozbargain.com.au" as title (the noise we identified)
-    cursor.execute(
-        "SELECT resolved_id, resolved_url FROM live_deals WHERE title = 'www.ozbargain.com.au' OR title = ''"
-    )
-    records = cursor.fetchall()
+    records = db.get_noisy_records()
 
     if not records:
         print("[*] No noisy records found to recover.")
-        conn.close()
         return
 
     print(f"[*] Found {len(records)} records requiring recovery. Starting re-scrape...")
 
     recovered_count = 0
-    for resolved_id, resolved_url in records:
-        url = resolved_url
+    for record in records:
+        resolved_id = record["resolved_id"]
+        resolved_url = record["resolved_url"]
+
         # Apply normalization if missing in the logged URL
-        url = normalize_deal_url(url)
+        url = normalize_deal_url(resolved_url)
 
         print(f"  [>] Processing {resolved_id} via {url}...")
 
@@ -54,7 +48,6 @@ def recover_data():
             print(f"    [!!] Unexpected error for {resolved_id}: {e}")
 
     print(f"\n[*] Data recovery complete. Recovered {recovered_count}/{len(records)} records.")
-    conn.close()
 
 
 if __name__ == "__main__":

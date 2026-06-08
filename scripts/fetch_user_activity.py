@@ -6,7 +6,7 @@ from ozbargain.core.scraper import BrowserScraper, FastScraper
 from ozbargain.db.manager import StorageManager
 
 
-def process_item(item: Dict, username: str):
+def process_item(item: Dict, username: str, db: StorageManager):
     """
     Worker function to process a single activity item.
     Scrapes the context deal and saves to DB.
@@ -16,7 +16,6 @@ def process_item(item: Dict, username: str):
 
     # 1. Init separate instances for thread safety
     scraper = FastScraper()
-    db = StorageManager()
 
     try:
         # 2. Scrape Deal/Context (Fast Mode - Requests)
@@ -84,13 +83,16 @@ def fetch_user_activity(username: str, limit: int = 50, workers: int = 8, headle
     count_submitted = 0
     futures = []
 
+    # Main DB manager instantiated on main thread to avoid concurrent migration runs
+    db = StorageManager()
+
     with concurrent.futures.ThreadPoolExecutor(max_workers=workers) as executor:
         # Iterate over the generator
         for activity_item in feed_scraper.get_user_activity(username, max_items=limit):
             count_submitted += 1
 
             # Submit to pool
-            future = executor.submit(process_item, activity_item, username)
+            future = executor.submit(process_item, activity_item, username, db)
             futures.append(future)
 
             # Optional: throttle submission if too fast?

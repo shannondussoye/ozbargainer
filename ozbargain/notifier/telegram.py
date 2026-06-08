@@ -1,5 +1,6 @@
 import requests
-from datetime import datetime
+from datetime import datetime, timezone
+from zoneinfo import ZoneInfo
 from ..config import settings
 from ..utils.logger import setup_logger
 
@@ -21,11 +22,12 @@ class TelegramNotifier:
         If priority is True, notification is sent with sound (standard).
         If priority is False, sent silently (disable_notification=True).
         """
-        timestamp = datetime.now().strftime("%H:%M:%S")
+        sydney_tz = ZoneInfo("Australia/Sydney")
+        timestamp = datetime.now(timezone.utc).astimezone(sydney_tz).strftime("%H:%M:%S")
 
         if not self.enabled:
             prefix = "🚨 " if priority else "ℹ️ "
-            logger.info("[TELEGRAM MOCK] %s: %s", timestamp, text)
+            logger.info("[TELEGRAM MOCK] %s%s: %s", prefix, timestamp, text)
             return True
 
         # Real Send using requests

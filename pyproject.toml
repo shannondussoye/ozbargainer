@@ -1,0 +1,34 @@
+[project]
+name = "ozbargainer"
+version = "1.0.0"
+description = "Real-time OzBargain deal monitor with trend tracking and alerts"
+requires-python = ">=3.12"
+dependencies = [
+    "requests",
+    "beautifulsoup4",
+    "playwright",
+    "pydantic-settings",
+    "python-json-logger"
+]
+
+[tool.ruff]
+line-length = 120
+exclude = [
+    ".git",
+    ".mypy_cache",
+    ".pytest_cache",
+    ".ruff_cache",
+    ".venv",
+    "venv",
+]
+
+[tool.ruff.lint]
+select = ["E", "F", "W"]
+ignore = [
+    "E501",  # Line too long (handled by line-length config)
+    "E701",  # Multiple statements on one line (colon)
+]
+
+[tool.mypy]
+ignore_missing_imports = true
+exclude = "(?:^|/)\\.venv/"
