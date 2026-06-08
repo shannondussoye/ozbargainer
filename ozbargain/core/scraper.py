@@ -104,7 +104,7 @@ class FastScraper:
                     linked_comment_id = r.url.split("#comment-")[1]
                     linked_comment_id = f"comment-{linked_comment_id}"
                 except Exception:
-                    pass
+                    logger.debug("Failed to split comment ID from URL: %s", r.url)
             elif "/comment/" in r.url:
                 try:
                     # Clean query params if any
@@ -114,7 +114,7 @@ class FastScraper:
                     part = part.replace("/redir", "").replace("/", "")
                     linked_comment_id = f"comment-{part}"
                 except Exception:
-                    pass
+                    logger.debug("Failed to extract comment ID from resolved URL part: %s", r.url)
 
             # Fallback: Check input URL if resolved URL is weird
             if not linked_comment_id and "/comment/" in url:
@@ -123,7 +123,7 @@ class FastScraper:
                     part = clean_url.split("/comment/")[1].split("/")[0]
                     linked_comment_id = f"comment-{part}"
                 except Exception:
-                    pass
+                    logger.debug("Failed to extract comment ID from fallback URL: %s", url)
 
             if linked_comment_id:
                 # Find the specific comment div
@@ -238,7 +238,8 @@ class BrowserScraper:
 
                         yield {"text": text, "url": full_url}
 
-                    except Exception:
+                    except Exception as item_e:
+                        logger.error("Error processing activity item: %s", item_e)
                         continue
 
                 if count >= max_items:
@@ -278,8 +279,8 @@ class BrowserScraper:
                                     retries = 0
                                     last_height = page.evaluate("document.body.scrollHeight")
                                     continue
-                            except Exception:
-                                pass
+                            except Exception as next_e:
+                                logger.debug("Error checking or clicking next button: %s", next_e)
 
                         if retries >= 10:
                             logger.info("End of feed reached.")
@@ -292,7 +293,7 @@ class BrowserScraper:
                     if "TargetClosed" in str(e) or "closed" in str(e):
                         logger.warning("Browser window closed. Finalizing.")
                         break
-                    pass
+                    logger.error("Error in user activity feed processing: %s", e)
 
             browser.close()
 
@@ -326,8 +327,8 @@ class BrowserScraper:
             # Move mouse again to trigger hover effects
             page.mouse.move(random.randint(100, 800), random.randint(100, 800))
 
-        except Exception:
-            pass
+        except Exception as scroll_e:
+            logger.debug("Error during human scroll: %s", scroll_e)
 
     def _get_comment_count(self, page: Page, url: str) -> int:
         """
@@ -458,7 +459,8 @@ class BrowserScraper:
                         result.title = page.title().split(" - ")[0]
                     # Tag as external
                     result.tags = ["External"]
-                except Exception:
+                except Exception as ext_e:
+                    logger.warning("Failed to scrape external redirect metadata: %s", ext_e)
                     result.title = f"External: {final_url}"
                 return result
 
@@ -560,14 +562,16 @@ class BrowserScraper:
             if page.locator("div.n-vote span.voteup span").count() > 0:
                 try:
                     result.upvotes = int((page.locator("div.n-vote span.voteup span").first.text_content() or "0").strip())
-                except Exception:
+                except Exception as vote_e:
+                    logger.warning("Failed to parse upvotes: %s", vote_e)
                     result.upvotes = 0
 
             # Downvotes
             if page.locator("div.n-vote span.votedown span").count() > 0:
                 try:
                     result.downvotes = int((page.locator("div.n-vote span.votedown span").first.text_content() or "0").strip())
-                except Exception:
+                except Exception as vote_e:
+                    logger.warning("Failed to parse downvotes: %s", vote_e)
                     result.downvotes = 0
 
             # Comment Count (delegated to helper)

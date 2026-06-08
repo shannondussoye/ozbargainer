@@ -1,3 +1,4 @@
+import signal
 import time
 from playwright.sync_api import sync_playwright
 from .scraper import BrowserScraper, BOT_WALL_TITLES
@@ -22,8 +23,9 @@ class LiveMonitor:
         self.cdp_url = settings.chrome_cdp_url
         self.scraper = BrowserScraper(headless=True, cdp_url=self.cdp_url)
         self.notifier = TelegramNotifier()
-        self.seen_rows = set()  # Cache to avoid re-processing simple rows in same session
-        self.last_scraped_times = {}  # url -> datetime
+        self.seen_rows: set = set()  # Cache to avoid re-processing simple rows in same session
+        self.last_scraped_times: dict = {}  # url -> datetime
+        self._shutdown = False
 
         # Configuration from Pydantic Settings
         self.min_heat_score = settings.min_heat_score
@@ -31,6 +33,16 @@ class LiveMonitor:
         self.poll_interval = settings.poll_interval  # Seconds
         self.scrape_cooldown = settings.scrape_cooldown_seconds  # Seconds
         self.healthcheck_url = settings.healthcheck_ping_url
+
+        # Register signal handlers for graceful shutdown
+        signal.signal(signal.SIGTERM, self._handle_signal)
+        signal.signal(signal.SIGINT, self._handle_signal)
+
+    def _handle_signal(self, signum: int, frame: object) -> None:
+        """Handles SIGTERM/SIGINT for graceful shutdown."""
+        sig_name = signal.Signals(signum).name
+        logger.info("Received %s. Shutting down gracefully...", sig_name, extra={"event_type": "shutdown"})
+        self._shutdown = True
 
     def process_deal(
         self, url: str, browser=None, event_data: Optional[Dict] = None, timeout: int = 30000
@@ -167,7 +179,7 @@ class LiveMonitor:
         logger.info("Starting Live Monitor...", extra={"event_type": "startup"})
         last_trending_check = datetime.now() - timedelta(minutes=self.trending_check_interval)
 
-        while True:
+        while not self._shutdown:
             logger.info("Initializing browser session...")
             try:
                 with sync_playwright() as p:
@@ -236,7 +248,7 @@ class LiveMonitor:
                     last_success_time = datetime.now()
                     session_start_time = datetime.now()
 
-                    while True:
+                    while not self._shutdown:
                         # Periodic session refresh (every 4 hours)
                         if datetime.now() - session_start_time > timedelta(hours=4):
                             logger.info("Periodic session refresh (4h limit reached).")
@@ -287,7 +299,7 @@ class LiveMonitor:
                             recent_rows = rows[:20]
                             for row in recent_rows:
                                 try:
-                                    type_str = row.locator("td:nth-child(5)").text_content().strip()
+                                    type_str = (row.locator("td:nth-child(5)").text_content() or "").strip()
                                     if type_str != "Deal":
                                         continue
 
@@ -296,10 +308,10 @@ class LiveMonitor:
                                         continue
                                     raw_url = subject_link_el.get_attribute("href") or ""
                                     url = normalize_deal_url(raw_url)
-                                    title_text = subject_link_el.text_content().strip()
+                                    title_text = (subject_link_el.text_content() or "").strip()
 
-                                    time_str = row.locator("td:nth-child(1)").text_content().strip()
-                                    user_str = row.locator("td:nth-child(2)").text_content().strip()
+                                    time_str = (row.locator("td:nth-child(1)").text_content() or "").strip()
+                                    user_str = (row.locator("td:nth-child(2)").text_content() or "").strip()
                                     action_el = row.locator("td:nth-child(3) i")
                                     action_str = action_el.get_attribute("title") or "Unknown"
 
@@ -352,7 +364,6 @@ class LiveMonitor:
                                     if "Target page, context or browser has been closed" in str(e):
                                         raise e
                                     logger.error("Row processing error: %s", e)
-                                    pass
 
                             # --- Housekeeping ---
                             if len(self.last_scraped_times) > 1000:
@@ -360,6 +371,10 @@ class LiveMonitor:
                                 self.last_scraped_times = {
                                     k: v for k, v in self.last_scraped_times.items() if v > cutoff
                                 }
+
+                            if len(self.seen_rows) > 5000:
+                                self.seen_rows.clear()
+                                logger.info("Cleared seen_rows cache (exceeded 5000 entries)")
 
                         except Exception as loop_e:
                             if "Target page, context or browser has been closed" in str(loop_e):
