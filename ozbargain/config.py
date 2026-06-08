@@ -22,6 +22,7 @@ class Settings(BaseSettings):
     healthcheck_ping_url: Optional[str] = Field(default=None, validation_alias="HEALTHCHECK_PING_URL")
     chrome_cdp_url: Optional[str] = Field(default=None, validation_alias="CHROME_CDP_URL")
     ozbargain_db_path: str = Field(default="ozbargain.db", validation_alias="OZBARGAIN_DB_PATH")
+    ozbargain_base_url: str = Field(default="https://www.ozbargain.com.au")
     logtail_token: Optional[str] = Field(
         default=None, validation_alias=AliasChoices("LOGTAIL_TOKEN", "LOGTAIL_SOURCE_TOKEN")
     )

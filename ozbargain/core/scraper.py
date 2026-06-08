@@ -3,12 +3,43 @@ import requests
 from datetime import datetime
 import random
 import time
-from typing import Dict
+from typing import Optional
+
+from bs4 import BeautifulSoup
+from requests.adapters import HTTPAdapter
+from urllib3.util.retry import Retry
 from playwright.sync_api import sync_playwright, Page
+
 from ..utils.logger import setup_logger
 from ..config import settings
+from ..models import DealResult
 
 logger = setup_logger("scraper")
+
+# Titles that indicate a bot-wall / security challenge rather than real content
+BOT_WALL_TITLES = frozenset({"OzBargain", "www.ozbargain.com.au", "Performing security verification"})
+
+# Default User-Agent for FastScraper HTTP requests
+_DEFAULT_UA = (
+    "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
+    "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.114 Safari/537.36"
+)
+
+
+def _build_retry_session() -> requests.Session:
+    """Creates a requests.Session with retry strategy for resilient HTTP fetching."""
+    session = requests.Session()
+    session.headers["User-Agent"] = _DEFAULT_UA
+    retry = Retry(
+        total=5,
+        backoff_factor=2,  # Wait 2s, 4s, 8s...
+        status_forcelist=[429, 500, 502, 503, 504],
+        allowed_methods=["HEAD", "GET", "OPTIONS"],
+    )
+    adapter = HTTPAdapter(max_retries=retry)
+    session.mount("https://", adapter)
+    session.mount("http://", adapter)
+    return session
 
 
 class FastScraper:
@@ -18,35 +49,16 @@ class FastScraper:
     """
 
     def __init__(self):
-        self.base_url = "https://www.ozbargain.com.au"
+        self.base_url = settings.ozbargain_base_url
+        self.session = _build_retry_session()
 
-    def scrape_deal_fast(self, url: str) -> Dict:
+    def scrape_deal_fast(self, url: str) -> DealResult:
         """
         Fast version of scrape_deal_page using requests instead of Playwright.
         Much more efficient for mass scraping.
         """
         try:
-            # Setup Retry Strategy for Stability
-            from requests.adapters import HTTPAdapter
-            from urllib3.util.retry import Retry
-
-            headers = {
-                "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.114 Safari/537.36"
-            }
-
-            session = requests.Session()
-            retry = Retry(
-                total=5,
-                backoff_factor=2,  # Wait 2s, 4s, 8s...
-                status_forcelist=[429, 500, 502, 503, 504],
-                allowed_methods=["HEAD", "GET", "OPTIONS"],
-            )
-            adapter = HTTPAdapter(max_retries=retry)
-            session.mount("https://", adapter)
-            session.mount("http://", adapter)
-
-            # Use session with retries
-            r = session.get(url, headers=headers, timeout=15)
+            r = self.session.get(url, timeout=15)
             r.raise_for_status()
             html = r.text
 
@@ -56,13 +68,10 @@ class FastScraper:
             if match:
                 deal_id = f"node/{match.group(1)}"
 
-            # BS4 Extraction
-            from bs4 import BeautifulSoup
-
             soup = BeautifulSoup(html, "html.parser")
 
             # Title
-            if soup.title:
+            if soup.title and soup.title.string:
                 title = soup.title.string.replace(" - OzBargain", "").strip()
             else:
                 title = "Unknown Deal"
@@ -71,7 +80,7 @@ class FastScraper:
             description = ""
             meta_desc = soup.find("meta", property="og:description")
             if meta_desc:
-                description = meta_desc.get("content", "")
+                description = str(meta_desc.get("content", ""))
 
             # Coupon
             coupon = None
@@ -129,31 +138,25 @@ class FastScraper:
             # Expired?
             is_expired = soup.find(class_="expired") is not None or soup.select_one(".node-expired") is not None
 
-            return {
-                "id": deal_id,
-                "url": r.url,
-                "title": title,
-                "description": description,
-                "price": "",
-                "coupon_code": coupon,
-                "tags": tags,
-                "upvotes": 0,
-                "downvotes": 0,
-                "comment_count": 0,  # Not parsing count in fast mode
-                "timestamp": datetime.now(),
-                "time_str": datetime.now().strftime("%H:%M"),
-                "user": "Unknown",
-                "action": "scraped",
-                "type": "deal",
-                "is_expired": is_expired,
-                "linked_comment": linked_comment,
-                "linked_comment_id": linked_comment_id,
-                "posted_date": "",
-                "external_domain": "",
-            }
+            return DealResult(
+                id=deal_id,
+                url=r.url,
+                title=title,
+                description=description,
+                coupon_code=coupon,
+                tags=tags,
+                is_expired=is_expired,
+                linked_comment=linked_comment,
+                linked_comment_id=linked_comment_id,
+                timestamp=datetime.now(),
+                time_str=datetime.now().strftime("%H:%M"),
+                user="Unknown",
+                action="scraped",
+                type="deal",
+            )
 
         except Exception as e:
-            return {"error": str(e), "url": url}
+            return DealResult(error=str(e), url=url)
 
 
 class BrowserScraper:
@@ -162,10 +165,10 @@ class BrowserScraper:
     and bypassing bot protection/challenges.
     """
 
-    def __init__(self, headless: bool = True, cdp_url: str = None):
+    def __init__(self, headless: bool = True, cdp_url: Optional[str] = None):
         self.headless = headless
         self.cdp_url = cdp_url or settings.chrome_cdp_url
-        self.base_url = "https://www.ozbargain.com.au"
+        self.base_url = settings.ozbargain_base_url
 
     def get_user_activity(self, user_id: str, max_items: int = 50):
         """
@@ -209,7 +212,7 @@ class BrowserScraper:
                             continue
 
                         action_el = item.locator(".right .action")
-                        text = action_el.text_content().strip()
+                        text = (action_el.text_content() or "").strip()
 
                         # Filter types
                         if not ("replied to" in text or "commented on" in text or "posted" in text):
@@ -293,7 +296,7 @@ class BrowserScraper:
 
             browser.close()
 
-    def _human_scroll(self, page: Page, aggressive=False):
+    def _human_scroll(self, page: Page, aggressive: bool = False):
         """
         Simulates human scrolling using mouse wheel and movement.
         """
@@ -356,11 +359,12 @@ class BrowserScraper:
 
             try:
                 # Construct absolute URL for last page
+                assert target_href is not None  # guaranteed by the loop above
                 if target_href.startswith("?"):
                     clean_url = url.split("?")[0]
                     target_url = f"{clean_url}{target_href}"
                 elif target_href.startswith("/"):
-                    target_url = f"https://www.ozbargain.com.au{target_href}"
+                    target_url = f"{self.base_url}{target_href}"
                 else:
                     target_url = target_href
 
@@ -397,18 +401,18 @@ class BrowserScraper:
                 header = page.locator("h2:has-text('Comments')")
 
             if header.count() > 0:
-                text = header.first.text_content().strip()
+                text = (header.first.text_content() or "").strip()
                 match = re.search(r"\((\d+)\)", text)
                 if match:
                     comment_count = int(match.group(1))
 
         return comment_count
 
-    def _extract_deal_data(self, page, url) -> Dict:
+    def _extract_deal_data(self, page: Page, url: str) -> DealResult:
         """
         Internal helper to extract data from an open page.
         """
-        data = {"url": url}
+        result = DealResult(url=url)
         try:
             # Wait for load - sometimes OzBargain has a "click to continue" or similar? usually not.
             page.wait_for_load_state("domcontentloaded")
@@ -426,17 +430,13 @@ class BrowserScraper:
                 # Breadcrumbs or Title link Usually: div.node-full h1 a or h2.title a
                 parent_link = page.locator("h2.title a, div.node-full h1 a, ul.breadcrumb a").first
                 if parent_link.count() > 0:
-                    parent_url = parent_link.get_attribute("href")
+                    parent_url = parent_link.get_attribute("href") or ""
                     if "/node/" in parent_url:
                         node_id = parent_url.split("/node/")[-1].split("?")[0].split("#")[0]
                         deal_id = f"node/{node_id}"
                         # Also grab title if missing or noisy
-                        if not data.get("title") or data.get("title") in [
-                            "OzBargain",
-                            "www.ozbargain.com.au",
-                            "Performing security verification",
-                        ]:
-                            data["title"] = parent_link.text_content().strip()
+                        if not result.title or result.title in BOT_WALL_TITLES:
+                            result.title = (parent_link.text_content() or "").strip()
 
                 # Fallback to comment ID if node not found
                 if not deal_id:
@@ -445,22 +445,22 @@ class BrowserScraper:
             else:
                 deal_id = final_url
 
-            data["id"] = deal_id
-            data["url"] = final_url
+            result.id = deal_id
+            result.url = final_url
 
             # Handle External Redirects (Non-OzBargain)
             if "ozbargain.com.au" not in final_url:
                 try:
                     og_title = page.locator('meta[property="og:title"]').get_attribute("content")
                     if og_title:
-                        data["title"] = og_title
+                        result.title = og_title
                     else:
-                        data["title"] = page.title().split(" - ")[0]
+                        result.title = page.title().split(" - ")[0]
                     # Tag as external
-                    data["tags"] = ["External"]
+                    result.tags = ["External"]
                 except Exception:
-                    data["title"] = f"External: {final_url}"
-                return data
+                    result.title = f"External: {final_url}"
+                return result
 
             # Handle Deep Linked Comment
             target_comment_id = None
@@ -470,36 +470,36 @@ class BrowserScraper:
                 target_comment_id = url.split("#")[-1]
 
             if target_comment_id:
-                data["linked_comment_id"] = target_comment_id
+                result.linked_comment_id = target_comment_id
                 # Selector for comment text: div#comment-id .content
                 comment_el = page.locator(f"#{target_comment_id} .content")
                 if comment_el.count() > 0:
-                    data["linked_comment"] = comment_el.text_content().strip()
+                    result.linked_comment = (comment_el.text_content() or "").strip()
 
             # Title
             if page.locator("h1#title").count() > 0:
-                data["title"] = page.locator("h1#title").text_content().strip()
+                result.title = (page.locator("h1#title").text_content() or "").strip()
             elif page.locator("h1").count() > 0:
-                data["title"] = page.locator("h1").first.text_content().strip()
+                result.title = (page.locator("h1").first.text_content() or "").strip()
 
-            # Expired Status (New)
-            data["is_expired"] = False
+            # Expired Status
+            result.is_expired = False
             # Check for "expired" span within the main node container
             node_el = page.locator("div.node").first
             if node_el.count() > 0 and node_el.locator("span:has-text('expired')").count() > 0:
-                data["is_expired"] = True
+                result.is_expired = True
 
             # Post-Extraction Cleanup: Title Noise
-            if data.get("title") in ["OzBargain", "www.ozbargain.com.au", "Performing security verification"]:
+            if result.title in BOT_WALL_TITLES:
                 logger.warning(
                     "Bot-wall detected", extra={"event_type": "security_challenge", "challenge_type": "cloudflare"}
                 )
                 # Attempt to extract from h2 if h1 was generic
                 h2_el = page.locator("h2").first
                 if h2_el.count() > 0:
-                    data["title"] = h2_el.text_content().strip()
+                    result.title = (h2_el.text_content() or "").strip()
 
-            # --- New Fields: Posted Date & Domain ---
+            # --- Posted Date & Domain ---
             submitted_loc = page.locator("div.submitted")
             if submitted_loc.count() > 0:
                 # Use the first one (primary deal submission)
@@ -508,41 +508,41 @@ class BrowserScraper:
                 # 1. External Domain
                 domain_link = primary_submitted.locator("a[href^='/goto/']")
                 if domain_link.count() > 0:
-                    data["external_domain"] = domain_link.first.text_content().strip()
+                    result.external_domain = (domain_link.first.text_content() or "").strip()
 
                 # 2. Posted Date
-                submitted_text = primary_submitted.text_content().strip()
+                submitted_text = (primary_submitted.text_content() or "").strip()
                 # Pattern: "on 13/12/2025 - 09:30"
                 match = re.search(r"on (\d{2}/\d{2}/\d{4} - \d{2}:\d{2})", submitted_text)
                 if match:
-                    data["posted_date"] = match.group(1)
+                    result.posted_date = match.group(1)
 
             # Coupon Code
             if page.locator("div.couponcode").count() > 0:
                 # Check for strong tags (usually the actual code)
                 strong_codes = page.locator("div.couponcode strong").all()
                 if strong_codes:
-                    codes = [el.text_content().strip() for el in strong_codes]
-                    data["coupon_code"] = ", ".join(codes)
+                    codes = [(el.text_content() or "").strip() for el in strong_codes]
+                    result.coupon_code = ", ".join(codes)
                 else:
-                    data["coupon_code"] = page.locator("div.couponcode").text_content().strip()
+                    result.coupon_code = (page.locator("div.couponcode").text_content() or "").strip()
 
             # Content / Description
             description_text = ""
             if page.locator("div.node-content").count() > 0:
-                description_text = page.locator("div.node-content").text_content().strip()
+                description_text = (page.locator("div.node-content").text_content() or "").strip()
             elif page.locator("div.content").count() > 0:
-                description_text = page.locator("div.content").first.text_content().strip()
+                description_text = (page.locator("div.content").first.text_content() or "").strip()
 
             # Clean description
-            if "coupon_code" in data and data["coupon_code"]:
-                code = data["coupon_code"]
+            if result.coupon_code:
+                code = result.coupon_code
                 if description_text.startswith(code):
                     description_text = description_text[len(code) :].strip()
                 else:
                     description_text = description_text.replace(code, "").strip()
 
-            data["description"] = description_text
+            result.description = description_text
 
             # Tags
             tags = []
@@ -551,44 +551,40 @@ class BrowserScraper:
                 "div.taxonomy a[href^='/cat/'], div.taxonomy a[href^='/tag/'], div.taxonomy a[href^='/brand/']"
             ).all()
             for link in tag_links:
-                tag_text = link.text_content().strip()
+                tag_text = (link.text_content() or "").strip()
                 if tag_text and tag_text not in tags:
                     tags.append(tag_text)
-            data["tags"] = tags
+            result.tags = tags
 
             # Upvotes
             if page.locator("div.n-vote span.voteup span").count() > 0:
                 try:
-                    data["upvotes"] = int(page.locator("div.n-vote span.voteup span").first.text_content().strip())
+                    result.upvotes = int((page.locator("div.n-vote span.voteup span").first.text_content() or "0").strip())
                 except Exception:
-                    data["upvotes"] = 0
-            else:
-                data["upvotes"] = 0
+                    result.upvotes = 0
 
             # Downvotes
             if page.locator("div.n-vote span.votedown span").count() > 0:
                 try:
-                    data["downvotes"] = int(page.locator("div.n-vote span.votedown span").first.text_content().strip())
+                    result.downvotes = int((page.locator("div.n-vote span.votedown span").first.text_content() or "0").strip())
                 except Exception:
-                    data["downvotes"] = 0
-            else:
-                data["downvotes"] = 0
+                    result.downvotes = 0
 
             # Comment Count (delegated to helper)
-            data["comment_count"] = self._get_comment_count(page, url)
+            result.comment_count = self._get_comment_count(page, url)
 
             # Price
-            if "title" in data:
-                price_match = re.search(r"\$\d+(?:,\d+)*(?:\.\d+)?", data["title"])
+            if result.title:
+                price_match = re.search(r"\$\d+(?:,\d+)*(?:\.\d+)?", result.title)
                 if price_match:
-                    data["price"] = price_match.group(0)
+                    result.price = price_match.group(0)
 
         except Exception as e:
-            data["error"] = str(e)
+            result.error = str(e)
 
-        return data
+        return result
 
-    def scrape_deal_page(self, url: str, browser=None, timeout: int = 30000) -> Dict:
+    def scrape_deal_page(self, url: str, browser=None, timeout: int = 30000) -> DealResult:
         """
         Scrapes details from a specific deal or comment page.
         Supports connecting via CDP if self.cdp_url is set.
@@ -612,7 +608,7 @@ class BrowserScraper:
                     browser.close()
                     return result
                 except Exception as e:
-                    return {"error": f"CDP Connection failed: {str(e)}", "url": url}
+                    return DealResult(error=f"CDP Connection failed: {str(e)}", url=url)
             else:
                 browser = p.chromium.launch(headless=self.headless)
                 page = browser.new_page()
@@ -622,7 +618,3 @@ class BrowserScraper:
 
                 browser.close()
                 return result
-
-
-# Compatibility alias
-OzBargainScraper = BrowserScraper

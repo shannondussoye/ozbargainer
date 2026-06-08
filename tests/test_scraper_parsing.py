@@ -1,11 +1,11 @@
 import pytest
 from playwright.sync_api import sync_playwright
-from ozbargain.core.scraper import OzBargainScraper, FastScraper
+from ozbargain.core.scraper import BrowserScraper, FastScraper
 
 
 @pytest.fixture(scope="module")
 def scraper():
-    return OzBargainScraper(headless=True)
+    return BrowserScraper(headless=True)
 
 
 @pytest.fixture(scope="module")
@@ -60,21 +60,22 @@ def test_extract_deal_data(scraper, page_with_fixture):
     # Pass a dummy url
     dummy_url = "https://www.ozbargain.com.au/node/123456"
 
-    data = scraper._extract_deal_data(page_with_fixture, dummy_url)
+    result = scraper._extract_deal_data(page_with_fixture, dummy_url)
 
-    assert data["title"] == "Amazing $19.99 Product"
-    assert data["price"] == "$19.99"
-    assert data["coupon_code"] == "SAVE20"
-    assert data["description"] == "This is an amazing product, enjoy the deal."
-    assert data["upvotes"] == 150
-    assert data["downvotes"] == 5
-    assert data["comment_count"] == 42
-    assert "Electronics" in data["tags"]
-    assert "Deals" in data["tags"]
-    assert data["external_domain"] == "external-store.com"
-    assert data["posted_date"] == "13/12/2025 - 09:30"
-    assert data["id"] == "node/123456"
-    assert data["is_expired"] == False
+    assert result.title == "Amazing $19.99 Product"
+    assert result.price == "$19.99"
+    assert result.coupon_code == "SAVE20"
+    assert result.description == "This is an amazing product, enjoy the deal."
+    assert result.upvotes == 150
+    assert result.downvotes == 5
+    assert result.comment_count == 42
+    assert "Electronics" in result.tags
+    assert "Deals" in result.tags
+    assert result.external_domain == "external-store.com"
+    assert result.posted_date == "13/12/2025 - 09:30"
+    assert result.id == "node/123456"
+    assert result.is_expired is False
+    assert result.has_error is False
 
 
 def test_fast_scraper_parsing(fast_scraper, mocker):
@@ -102,11 +103,12 @@ def test_fast_scraper_parsing(fast_scraper, mocker):
 
     mocker.patch("requests.Session.get", return_value=mock_response)
 
-    data = fast_scraper.scrape_deal_fast("https://www.ozbargain.com.au/node/999999")
+    result = fast_scraper.scrape_deal_fast("https://www.ozbargain.com.au/node/999999")
 
-    assert data["title"] == "Fast Deal $10.00"
-    assert data["description"] == "Fast meta desc"
-    assert data["coupon_code"] == "FAST10"
-    assert data["tags"] == ["Fast"]
-    assert data["is_expired"] == True
-    assert data["id"] == "node/999999"
+    assert result.title == "Fast Deal $10.00"
+    assert result.description == "Fast meta desc"
+    assert result.coupon_code == "FAST10"
+    assert result.tags == ["Fast"]
+    assert result.is_expired is True
+    assert result.id == "node/999999"
+    assert result.has_error is False

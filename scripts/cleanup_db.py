@@ -1,11 +1,12 @@
-from ozbargain.core.scraper import OzBargainScraper
+from ozbargain.core.scraper import BrowserScraper
 from ozbargain.db.manager import StorageManager
 from ozbargain.utils.urls import normalize_deal_url
+from ozbargain.core.scraper import BOT_WALL_TITLES
 
 
 def recover_data():
     db = StorageManager()
-    scraper = OzBargainScraper(headless=True)
+    scraper = BrowserScraper(headless=True)
 
     conn = db._get_connection()
     cursor = conn.cursor()
@@ -33,21 +34,21 @@ def recover_data():
 
         try:
             # Re-scrape using the full scraper logic
-            deal_data = scraper.scrape_deal_page(url)
+            deal = scraper.scrape_deal_page(url)
 
-            if "error" in deal_data:
-                print(f"    [!] Error scraping {resolved_id}: {deal_data['error']}")
+            if deal.has_error:
+                print(f"    [!] Error scraping {resolved_id}: {deal.error}")
                 continue
 
             # Use upsert to fix the record
-            db.upsert_live_deal(deal_data)
+            db.upsert_live_deal(deal)
 
             # Check if title fixed
-            if deal_data.get("title") not in ["OzBargain", "www.ozbargain.com.au"]:
-                print(f"    [+] Successfully recovered title: {deal_data['title']}")
+            if deal.title not in BOT_WALL_TITLES:
+                print(f"    [+] Successfully recovered title: {deal.title}")
                 recovered_count += 1
             else:
-                print(f"    [?] Title still generic: {deal_data.get('title')}")
+                print(f"    [?] Title still generic: {deal.title}")
 
         except Exception as e:
             print(f"    [!!] Unexpected error for {resolved_id}: {e}")
