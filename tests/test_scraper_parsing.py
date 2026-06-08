@@ -1,10 +1,17 @@
 import pytest
 from playwright.sync_api import sync_playwright
-from ozbargain.core.scraper import OzBargainScraper
+from ozbargain.core.scraper import OzBargainScraper, FastScraper
+
 
 @pytest.fixture(scope="module")
 def scraper():
     return OzBargainScraper(headless=True)
+
+
+@pytest.fixture(scope="module")
+def fast_scraper():
+    return FastScraper()
+
 
 @pytest.fixture(scope="module")
 def page_with_fixture():
@@ -34,24 +41,27 @@ def page_with_fixture():
         </body>
     </html>
     """
-    
+
     with sync_playwright() as p:
         browser = p.chromium.launch(headless=True)
         page = browser.new_page()
-        
+
         # Route the specific URL to return our HTML fixture
-        page.route("https://www.ozbargain.com.au/node/123456", lambda route: route.fulfill(body=html_content, status=200))
+        page.route(
+            "https://www.ozbargain.com.au/node/123456", lambda route: route.fulfill(body=html_content, status=200)
+        )
         page.goto("https://www.ozbargain.com.au/node/123456")
-        
+
         yield page
         browser.close()
+
 
 def test_extract_deal_data(scraper, page_with_fixture):
     # Pass a dummy url
     dummy_url = "https://www.ozbargain.com.au/node/123456"
-    
+
     data = scraper._extract_deal_data(page_with_fixture, dummy_url)
-    
+
     assert data["title"] == "Amazing $19.99 Product"
     assert data["price"] == "$19.99"
     assert data["coupon_code"] == "SAVE20"
@@ -66,7 +76,8 @@ def test_extract_deal_data(scraper, page_with_fixture):
     assert data["id"] == "node/123456"
     assert data["is_expired"] == False
 
-def test_fast_scraper_parsing(scraper, mocker):
+
+def test_fast_scraper_parsing(fast_scraper, mocker):
     # Test scrape_deal_fast with a mocked requests.Session.get
     html_content = """
     <html>
@@ -83,16 +94,16 @@ def test_fast_scraper_parsing(scraper, mocker):
         </body>
     </html>
     """
-    
+
     mock_response = mocker.Mock()
     mock_response.text = html_content
     mock_response.url = "https://www.ozbargain.com.au/node/999999"
     mock_response.raise_for_status = mocker.Mock()
-    
+
     mocker.patch("requests.Session.get", return_value=mock_response)
-    
-    data = scraper.scrape_deal_fast("https://www.ozbargain.com.au/node/999999")
-    
+
+    data = fast_scraper.scrape_deal_fast("https://www.ozbargain.com.au/node/999999")
+
     assert data["title"] == "Fast Deal $10.00"
     assert data["description"] == "Fast meta desc"
     assert data["coupon_code"] == "FAST10"

@@ -52,7 +52,7 @@ graph TD
     * **Context Awareness**: Resolves comment links back to their parent deal nodes.
 * **`ozbargain.db.manager`**: Centralized SQLite state management. Features a **Data Integrity Guard** to prevent Cloudflare blocks from overwriting high popularity scores with zeros. Tracks snapshots for trending analytics and maintains the alert history.
 * **`ozbargain.notifier.telegram`**: Dispatcher for real-time deal alerts.
-* **`ozbargain.utils.logger`**: Professional dual-sink logging utility. 
+* **`ozbargain.utils.logger`**: Professional dual-sink logging utility.
     * **Human Sink**: Formatted stdout for terminal debugging.
     * **Machine Sink**: JSON-lines in `logs/monitor.log` for programmatic analysis.
     * **Remote Sink**: Real-time structured log streaming to Logtail.
@@ -155,7 +155,7 @@ Useful utilities located in the `scripts/` directory:
 ---
 
 ## 🛡 Security & Anti-Bot
-OzBargain employs aggressive security verification (Cloudflare Turnstile). This scraper implements a **Hybrid Resolution** strategy: 
+OzBargain employs aggressive security verification (Cloudflare Turnstile). This scraper implements a **Hybrid Resolution** strategy:
 1. If a direct scrape is blocked, it resolves the event using metadata captured from the Live Feed row.
 2. For comments, it automatically looks up the parent deal in the database to ensure data integrity.
 

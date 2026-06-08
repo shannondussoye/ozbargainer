@@ -26,11 +26,11 @@ docker exec "$CONTAINER_NAME" sqlite3 "$DB_PATH_IN_CONTAINER" ".backup '$BACKUP_
 
 if [ $? -eq 0 ]; then
     echo "[Success] Backup created: backups/$BACKUP_FILENAME"
-    
+
     # Retention Policy on Host
     # List files by time, skip the newest ones, and remove the old ones.
     ls -t "$PROJECT_DIR/backups"/ozbargain_*.db | tail -n +$((RETENTION_COUNT + 1)) | xargs -r rm
-    
+
     echo "[Info] Retention policy applied (Kept last $RETENTION_COUNT backups)."
 else
     echo "[Error] Backup failed! (Is the container running?)"

@@ -15,6 +15,10 @@ venv/
 .gemini/
 brain/
 chrome_startup.log
-dashboard_prototype.html
 TODO.md
-logs/backups/
+logs/
+
+# Linting & Caches
+.mypy_cache/
+.ruff_cache/
+.pytest_cache/
