@@ -101,3 +101,74 @@ def test_connection_context_manager_closes_on_error(db):
 
     mock_conn.close.assert_called_once()
 
+
+def test_get_trending_deals(db):
+    """
+    Verify trending deals retrieval, heat score calculation, and filtering of expired deals.
+    """
+    deal_a = DealResult(id="node/101", title="Deal A", upvotes=50, comment_count=10)
+    deal_b = DealResult(id="node/102", title="Deal B", upvotes=20, comment_count=5)
+    deal_c = DealResult(id="node/103", title="Deal C", upvotes=5, comment_count=0, is_expired=True)
+
+    db.upsert_live_deal(deal_a)
+    db.upsert_live_deal(deal_b)
+    db.upsert_live_deal(deal_c)
+
+    # A: 50 * 2 + 10 = 110, B: 20 * 2 + 5 = 45, C is expired
+    results = db.get_trending_deals(hours=24, min_score=40)
+    assert len(results) == 2
+    assert results[0]["resolved_id"] == "node/101"
+    assert results[0]["heat_score"] == 110
+    assert results[1]["resolved_id"] == "node/102"
+    assert results[1]["heat_score"] == 45
+
+    # min_score = 100 filter
+    results_high = db.get_trending_deals(hours=24, min_score=100)
+    assert len(results_high) == 1
+    assert results_high[0]["resolved_id"] == "node/101"
+
+
+def test_resolve_node_id_by_title(db):
+    """
+    Verify that resolve_node_id_by_title performs exact and fuzzy matches.
+    """
+    db.upsert_live_deal(DealResult(id="node/201", title="Unique Offer Today Only"))
+    db.upsert_live_deal(DealResult(id="node/202", title="Another Deal"))
+
+    # Exact
+    assert db.resolve_node_id_by_title("Unique Offer Today Only") == "node/201"
+
+    # Fuzzy
+    assert db.resolve_node_id_by_title("Unique Offer") == "node/201"
+
+    # Not found
+    assert db.resolve_node_id_by_title("Non existent") is None
+
+
+def test_cleanup_snapshots(db):
+    """
+    Verify old snapshots are deleted and recent ones are kept.
+    """
+    with db._get_connection() as conn:
+        cursor = conn.cursor()
+        cursor.execute(
+            "INSERT INTO deal_snapshots (deal_id, timestamp, upvotes, comment_count) VALUES (?, datetime('now', '-240 hours'), ?, ?)",
+            ("node/301", 10, 2)
+        )
+        cursor.execute(
+            "INSERT INTO deal_snapshots (deal_id, timestamp, upvotes, comment_count) VALUES (?, datetime('now', '-1 hours'), ?, ?)",
+            ("node/302", 20, 5)
+        )
+        conn.commit()
+
+    db.cleanup_snapshots(hours_retention=168)
+
+    with db._get_connection() as conn:
+        cursor = conn.cursor()
+        cursor.execute("SELECT deal_id FROM deal_snapshots")
+        rows = cursor.fetchall()
+
+    assert len(rows) == 1
+    assert rows[0][0] == "node/302"
+
+
