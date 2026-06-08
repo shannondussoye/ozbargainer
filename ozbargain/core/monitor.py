@@ -321,7 +321,8 @@ class LiveMonitor:
                 browser = p.chromium.launch(headless=True)
 
             try:
-                page = browser.new_page()
+                context = browser.new_context()
+                page = context.new_page()
                 logger.info("Navigating to /live...")
                 page.goto(f"{settings.ozbargain_base_url}/live", timeout=60000, wait_until="domcontentloaded")
                 page.wait_for_selector("tbody#livebody", timeout=30000)
