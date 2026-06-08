@@ -1,5 +1,6 @@
 import pytest
 from ozbargain.db.manager import StorageManager
+from ozbargain.models import DealResult
 
 
 @pytest.fixture
@@ -18,24 +19,24 @@ def test_data_integrity_guard_preserves_upvotes(db):
 
     # Insert initial state with real upvotes
     db.upsert_live_deal(
-        {
-            "id": deal_id,
-            "url": f"https://www.ozbargain.com.au/{deal_id}",
-            "title": "Test Deal",
-            "upvotes": 50,
-            "comment_count": 10,
-        }
+        DealResult(
+            id=deal_id,
+            url=f"https://www.ozbargain.com.au/{deal_id}",
+            title="Test Deal",
+            upvotes=50,
+            comment_count=10,
+        )
     )
 
     # Simulate a scraper hitting a bot-wall and returning 0 upvotes
     db.upsert_live_deal(
-        {
-            "id": deal_id,
-            "url": f"https://www.ozbargain.com.au/{deal_id}",
-            "title": "Test Deal",
-            "upvotes": 0,
-            "comment_count": 0,
-        }
+        DealResult(
+            id=deal_id,
+            url=f"https://www.ozbargain.com.au/{deal_id}",
+            title="Test Deal",
+            upvotes=0,
+            comment_count=0,
+        )
     )
 
     conn = db._get_connection()
@@ -56,9 +57,9 @@ def test_data_integrity_guard_updates_real_votes(db):
     """
     deal_id = "node/124"
 
-    db.upsert_live_deal({"id": deal_id, "title": "Deal 2", "upvotes": 50})
+    db.upsert_live_deal(DealResult(id=deal_id, title="Deal 2", upvotes=50))
 
-    db.upsert_live_deal({"id": deal_id, "title": "Deal 2", "upvotes": 60})
+    db.upsert_live_deal(DealResult(id=deal_id, title="Deal 2", upvotes=60))
 
     conn = db._get_connection()
     cursor = conn.cursor()

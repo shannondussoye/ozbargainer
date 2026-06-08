@@ -2,7 +2,7 @@ import argparse
 import time
 import concurrent.futures
 from typing import Dict
-from ozbargain.core.scraper import OzBargainScraper, FastScraper
+from ozbargain.core.scraper import BrowserScraper, FastScraper
 from ozbargain.db.manager import StorageManager
 
 
@@ -20,25 +20,25 @@ def process_item(item: Dict, username: str):
 
     try:
         # 2. Scrape Deal/Context (Fast Mode - Requests)
-        deal_data = scraper.scrape_deal_fast(url)
-        if "error" in deal_data:
-            print(f"[!] Error processing {url}: {deal_data['error']}")
+        deal = scraper.scrape_deal_fast(url)
+        if deal.has_error:
+            print(f"[!] Error processing {url}: {deal.error}")
             return False
 
         # 3. Store Deal Context (Mark as manual_fetch)
-        db.upsert_live_deal(deal_data, source="manual_fetch")
+        db.upsert_live_deal(deal, source="manual_fetch")
 
         # 4. Store Activity
-        content = deal_data.get("linked_comment")
+        content = deal.linked_comment
         activity_type = "comment"
-        activity_ref = deal_data.get("linked_comment_id")
+        activity_ref = deal.linked_comment_id
 
         # Fallback if no specific comment content found
         if not content:
             if "posted" in text.lower():
                 activity_type = "post"
-                content = deal_data.get("title")
-                activity_ref = deal_data.get("id")
+                content = deal.title
+                activity_ref = deal.id
             else:
                 content = "[No Comment Content Extracted (Fast Mode)]"
                 # Create a unique ref if missing
@@ -47,7 +47,7 @@ def process_item(item: Dict, username: str):
         if activity_ref and content:
             db.log_user_activity(
                 user_id=username,
-                deal_id=deal_data.get("id") or "",
+                deal_id=deal.id or "",
                 activity_ref=activity_ref,
                 content=content,
                 activity_type=activity_type,
@@ -77,7 +77,7 @@ def fetch_user_activity(username: str, limit: int = 50, workers: int = 8, headle
 
     # Main Scraper for the Feed (Generator)
     # This one drives the pagination loops
-    feed_scraper = OzBargainScraper(headless=headless)
+    feed_scraper = BrowserScraper(headless=headless)
 
     print("[*] Fetching activity feed stream...")
 

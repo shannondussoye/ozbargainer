@@ -1,13 +1,13 @@
 import time
 from playwright.sync_api import sync_playwright
-from .scraper import OzBargainScraper
+from .scraper import BrowserScraper, BOT_WALL_TITLES
 from ..db.manager import StorageManager
 from ..notifier.telegram import TelegramNotifier
 from datetime import datetime, timedelta
 import re
 import random
 import requests
-from typing import Dict, Optional
+from typing import Dict, Optional, Tuple
 from ..utils.logger import setup_logger
 
 from ..config import settings
@@ -20,7 +20,7 @@ class LiveMonitor:
     def __init__(self):
         self.db = StorageManager()
         self.cdp_url = settings.chrome_cdp_url
-        self.scraper = OzBargainScraper(headless=True, cdp_url=self.cdp_url)
+        self.scraper = BrowserScraper(headless=True, cdp_url=self.cdp_url)
         self.notifier = TelegramNotifier()
         self.seen_rows = set()  # Cache to avoid re-processing simple rows in same session
         self.last_scraped_times = {}  # url -> datetime
@@ -33,54 +33,64 @@ class LiveMonitor:
         self.healthcheck_url = settings.healthcheck_ping_url
 
     def process_deal(
-        self, url: str, browser=None, event_data: Dict = None, timeout: int = 30000
-    ) -> (Optional[str], Optional[str]):
+        self, url: str, browser=None, event_data: Optional[Dict] = None, timeout: int = 30000
+    ) -> Tuple[Optional[str], Optional[str]]:
         """
         Processes a deal URL: Scrape -> Merge -> Upsert
         """
         # Scrape
-        deal_data = self.scraper.scrape_deal_page(url, browser=browser, timeout=timeout)
+        deal = self.scraper.scrape_deal_page(url, browser=browser, timeout=timeout)
 
-        if "error" in deal_data:
-            logger.error("Error scraping %s: %s", url, deal_data["error"])
+        if deal.has_error:
+            logger.error("Error scraping %s: %s", url, deal.error)
             return None, None
 
-        # Merge event data
+        # Merge event data (explicit field assignment instead of dict.update)
         if event_data:
-            deal_data.update(event_data)
+            if event_data.get("title"):
+                deal.title = deal.title or event_data["title"]
+            if event_data.get("original_url"):
+                deal.original_url = event_data["original_url"]
+            if event_data.get("timestamp"):
+                deal.timestamp = event_data["timestamp"]
+            if event_data.get("time_str"):
+                deal.time_str = event_data["time_str"]
+            if event_data.get("user"):
+                deal.user = event_data["user"]
+            if event_data.get("action"):
+                deal.action = event_data["action"]
+            if event_data.get("type"):
+                deal.type = event_data["type"]
 
         # Upsert
-        deal_id = deal_data.get("id") or url
+        deal_id = deal.id or url
 
         # --- Metadata & ID Recovery Fallback ---
         # If we have a generic title but a good one from event_data (live row), restore it
         rows_title = event_data.get("title") if event_data else None
-        if rows_title and (
-            not deal_data.get("title")
-            or deal_data.get("title") in ["OzBargain", "www.ozbargain.com.au", "Performing security verification"]
-        ):
-            deal_data["title"] = rows_title
+        if rows_title and (not deal.title or deal.title in BOT_WALL_TITLES):
+            deal.title = rows_title
 
         # If deal_id is a comment, try to resolve to parent node via title
         if deal_id and deal_id.startswith("comment/"):
-            parent_id = self.db.resolve_node_id_by_title(deal_data.get("title"))
+            parent_id = self.db.resolve_node_id_by_title(deal.title)
             if parent_id:
                 logger.info("Resolved comment %s to parent node %s", deal_id, parent_id)
                 deal_id = parent_id
-                deal_data["id"] = deal_id
+                deal.id = deal_id
 
         # Final Upsert
-        deal_id = self.db.upsert_live_deal(deal_data)
+        deal_id = self.db.upsert_live_deal(deal)
 
         # --- Priority Alerts ---
         try:
             # Skip if expired
-            if deal_data.get("is_expired"):
+            if deal.is_expired:
                 logger.info("Skipping alerts for Expired Deal: %s", deal_id)
-                return deal_id, deal_data.get("url")
+                return deal_id, deal.url
 
             watched_tags = self.db.get_watched_tags()
-            deal_tags = set(deal_data.get("tags", []))
+            deal_tags = set(deal.tags)
 
             # Simple intersection check
             matches = [tag for tag in watched_tags if tag in deal_tags]
@@ -89,12 +99,12 @@ class LiveMonitor:
                 # Check DB history to prevent duplicates (Persistence)
                 if not self.db.has_alerted(deal_id, "priority"):
                     # Fire Priority Alert
-                    deal_link = f"https://www.ozbargain.com.au/{deal_id}"
+                    deal_link = f"{settings.ozbargain_base_url}/{deal_id}"
                     alert_text = (
                         f"<b>🚨 ALERT: Watched Tag Found!</b>\n\n"
                         f"<b>Matching:</b> {', '.join(matches)}\n"
-                        f"<b>Deal:</b> <a href='{deal_link}'>{deal_data.get('title')}</a>\n"
-                        f"<b>Price:</b> {deal_data.get('price', 'N/A')}"
+                        f"<b>Deal:</b> <a href='{deal_link}'>{deal.title}</a>\n"
+                        f"<b>Price:</b> {deal.price or 'N/A'}"
                     )
 
                     if self.notifier.send_message(alert_text, priority=True):
@@ -110,10 +120,10 @@ class LiveMonitor:
             logger.error("Error checking alerts: %s", e)
 
         # Log
-        title_sample = deal_data.get("title", "No Title")[:50]
+        title_sample = (deal.title or "No Title")[:50]
         logger.info("Upserted Deal: %s - %s", deal_id, title_sample)
 
-        return deal_id, deal_data.get("url")
+        return deal_id, deal.url
 
     def parse_relative_time(self, time_str):
         try:
@@ -175,7 +185,7 @@ class LiveMonitor:
                     page = browser.new_page()
 
                     logger.info("Navigating to /live...")
-                    page.goto("https://www.ozbargain.com.au/live", timeout=60000, wait_until="domcontentloaded")
+                    page.goto(f"{settings.ozbargain_base_url}/live", timeout=60000, wait_until="domcontentloaded")
                     page.wait_for_selector("tbody#livebody", timeout=30000)
 
                     # Setup Filters: Uncheck Wiki
@@ -244,7 +254,7 @@ class LiveMonitor:
                                 for deal in candidates:
                                     deal_id = deal["resolved_id"]
                                     if not self.db.has_alerted(deal_id, "trending"):
-                                        deal_link = f"https://www.ozbargain.com.au/{deal_id}"
+                                        deal_link = f"{settings.ozbargain_base_url}/{deal_id}"
                                         msg = (
                                             f"<b>🔥 POPULAR DEAL!</b> (Score: {deal['heat_score']})\n\n"
                                             f"<a href='{deal_link}'>{deal['title']}</a>\n"

@@ -4,6 +4,7 @@ from datetime import datetime
 from typing import Dict, List, Optional
 from ..utils.logger import setup_logger
 from ..config import settings
+from ..models import DealResult
 from .schema import run_migrations
 
 logger = setup_logger("db_manager")
@@ -32,21 +33,17 @@ class StorageManager:
         # Perform initial cleanup on startup
         self.cleanup_snapshots()
 
-    def upsert_live_deal(self, data: Dict, source: str = "live") -> Optional[str]:
+    def upsert_live_deal(self, deal: "DealResult", source: str = "live") -> Optional[str]:
         """Inserts or updates a deal record, and logs a history snapshot."""
         conn = self._get_connection()
         cursor = conn.cursor()
 
         # Determine PK
-        resolved_id = data.get("id") or data.get("url")  # Scraper returns 'id'
-        resolved_url = data.get("url")
+        resolved_id = deal.id or deal.url
+        resolved_url = deal.url
 
         # Serialize tags to JSON array
-        tags = data.get("tags", [])
-        if isinstance(tags, list):
-            tags_str = json.dumps(tags)
-        else:
-            tags_str = json.dumps([str(tags)]) if tags else "[]"
+        tags_str = json.dumps(deal.tags) if isinstance(deal.tags, list) else json.dumps([])
 
         now_ts = datetime.now()
 
@@ -54,8 +51,8 @@ class StorageManager:
         cursor.execute("SELECT upvotes, comment_count FROM live_deals WHERE resolved_id = ?", (resolved_id,))
         existing = cursor.fetchone()
 
-        upvotes = data.get("upvotes", 0)
-        comment_count = data.get("comment_count", 0)
+        upvotes = deal.upvotes
+        comment_count = deal.comment_count
 
         # Data Integrity Guard:
         # If scraper hits a bot-wall, it might return 0 upvotes/comments.
@@ -83,29 +80,29 @@ class StorageManager:
             (
                 resolved_id,
                 resolved_url,
-                data.get("url"),
-                data.get("title"),
-                data.get("price"),
-                data.get("description"),
-                data.get("coupon_code"),
+                deal.original_url or deal.url,
+                deal.title,
+                deal.price,
+                deal.description,
+                deal.coupon_code,
                 tags_str,
                 upvotes,
-                data.get("downvotes", 0),
+                deal.downvotes,
                 comment_count,
                 now_ts,
-                data.get("time_str"),
-                data.get("user"),
-                data.get("action"),
-                data.get("type"),
-                1 if data.get("is_expired") else 0,
-                data.get("posted_date"),
-                data.get("external_domain"),
+                deal.time_str,
+                deal.user,
+                deal.action,
+                deal.type,
+                1 if deal.is_expired else 0,
+                deal.posted_date,
+                deal.external_domain,
                 source,
             ),
         )
 
         # 3. Add History Snapshot (For Trending Velocity)
-        # We assume data["timestamp"] is the event time, but for snapshots we usually want "recorded at" time
+        # We assume deal.timestamp is the event time, but for snapshots we usually want "recorded at" time
         # Using current system time for the snapshot timestamp makes velocity calcs reliable relative to "now"
         cursor.execute(
             """
