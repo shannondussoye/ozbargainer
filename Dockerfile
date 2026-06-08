@@ -18,6 +18,10 @@ COPY . .
 # Create directory for database/artifacts if valuable
 RUN mkdir -p /app/data
 
+# Non-root user for security
+RUN useradd -m -s /bin/bash appuser && chown -R appuser:appuser /app
+USER appuser
+
 # Set environment variables for generic usage
 ENV PYTHONUNBUFFERED=1
 ENV PYTHONPATH=/app

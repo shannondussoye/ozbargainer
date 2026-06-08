@@ -10,12 +10,6 @@ def run_migrations(conn: sqlite3.Connection):
     """
     cursor = conn.cursor()
 
-    # Drop legacy tables if they exist
-    cursor.execute("DROP TABLE IF EXISTS activities")
-    cursor.execute("DROP TABLE IF EXISTS deal_tags")
-    cursor.execute("DROP TABLE IF EXISTS deals")
-    cursor.execute("DROP TABLE IF EXISTS users")
-
     # Single Live Deals Table
     # PK is the resolved_id (canonical node ID)
     cursor.execute("""
