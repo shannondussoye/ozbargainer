@@ -66,7 +66,6 @@ def audit_port(port: int, label: str, close_stale: bool = False) -> dict:
     stale = []
     for tab in pages:
         tab_url = tab.get("url", "")
-        tab_title = tab.get("title", "")[:50]
         is_safe = any(f in tab_url for f in SAFE_URL_FRAGMENTS)
         tag = "✅" if is_safe else "⚠️  STALE"
         print(f"    {tag}  [{tab['type']}] {tab_url[:70]}")
@@ -80,7 +79,7 @@ def audit_port(port: int, label: str, close_stale: bool = False) -> dict:
         for t in iframes:
             d = urlparse(t.get("url", "")).netloc
             domains[d] = domains.get(d, 0) + 1
-        print(f"\n    iframes by domain:")
+        print("\n    iframes by domain:")
         for domain, count in sorted(domains.items(), key=lambda x: -x[1]):
             print(f"      {count:3d}x  {domain}")
 
