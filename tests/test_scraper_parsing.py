@@ -112,3 +112,37 @@ def test_fast_scraper_parsing(fast_scraper, mocker):
     assert result.is_expired is True
     assert result.id == "node/999999"
     assert result.has_error is False
+
+
+def test_ld_json_comment_count_browser(scraper, mocker):
+    mock_page = mocker.Mock()
+    mock_locator = mocker.Mock()
+    mock_locator.all_inner_texts.return_value = [
+        '[{"@context":"https://schema.org","@type":"NewsArticle","commentCount":123}]'
+    ]
+    mock_page.locator.return_value = mock_locator
+
+    count = scraper._get_comment_count(mock_page, "https://www.ozbargain.com.au/node/888888")
+    assert count == 123
+    mock_page.locator.assert_called_once_with('script[type="application/ld+json"]')
+
+
+def test_ld_json_comment_count_fast(fast_scraper, mocker):
+    html_content = """
+    <html>
+        <head>
+            <script type="application/ld+json">[{"@context":"https://schema.org","commentCount":456}]</script>
+        </head>
+        <body></body>
+    </html>
+    """
+    mock_response = mocker.Mock()
+    mock_response.text = html_content
+    mock_response.url = "https://www.ozbargain.com.au/node/777777"
+    mock_response.raise_for_status = mocker.Mock()
+
+    mocker.patch("requests.Session.get", return_value=mock_response)
+
+    result = fast_scraper.scrape_deal_fast("https://www.ozbargain.com.au/node/777777")
+    assert result.comment_count == 456
+

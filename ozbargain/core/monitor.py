@@ -323,6 +323,7 @@ class LiveMonitor:
             try:
                 context = browser.new_context()
                 page = context.new_page()
+                self.scraper.setup_page_routing(page)
                 logger.info("Navigating to /live...")
                 page.goto(f"{settings.ozbargain_base_url}/live", timeout=60000, wait_until="domcontentloaded")
                 page.wait_for_selector("tbody#livebody", timeout=30000)
@@ -383,7 +384,7 @@ class LiveMonitor:
                         if not self._should_scrape(url, title_text):
                             continue
 
-                        self.process_deal(url, browser=browser, event_data=event_data, timeout=15000)
+                        self.process_deal(url, browser=browser, event_data=event_data, timeout=30000)
 
                     except Exception as e:
                         if "Target page, context or browser has been closed" in str(e):
