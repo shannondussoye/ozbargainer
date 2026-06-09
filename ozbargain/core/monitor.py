@@ -407,6 +407,34 @@ class LiveMonitor:
                     self.seen_rows.clear()
                     logger.info("Cleared seen_rows cache (exceeded 5000 entries)")
 
+                # --- Tab Leak Guard ---
+                # Each deal scrape opens a new tab in the shared Chrome instance and
+                # closes it via page.close(). If close() is skipped (e.g. an exception
+                # fires before the finally block), tabs accumulate as zombie renderer
+                # processes. We audit every poll cycle: anything that isn't the /live
+                # page and has finished loading is a leaked tab and gets forcibly closed.
+                try:
+                    all_pages = [p for ctx in browser.contexts for p in ctx.pages]
+                    tab_count = len(all_pages)
+                    if tab_count > 3:  # /live page + up to 2 in-flight scrapes is normal
+                        logger.warning(
+                            "Tab leak detected: %d open tabs in Chrome. Closing stale tabs.",
+                            tab_count,
+                        )
+                        live_url = f"{settings.ozbargain_base_url}/live"
+                        for open_page in all_pages:
+                            try:
+                                page_url = open_page.url
+                                # Keep the /live page and any blank new-tab page
+                                if live_url in page_url or page_url in ("", "about:blank", "chrome://newtab/"):
+                                    continue
+                                logger.info("Closing stale tab: %s", page_url[:80])
+                                open_page.close()
+                            except Exception as close_err:
+                                logger.debug("Could not close stale tab: %s", close_err)
+                except Exception as tab_err:
+                    logger.debug("Tab leak guard error: %s", tab_err)
+
             except Exception as loop_e:
                 if "Target page, context or browser has been closed" in str(loop_e):
                     raise loop_e
