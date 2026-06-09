@@ -727,10 +727,13 @@ class BrowserScraper:
                     browser = p.chromium.connect_over_cdp(self.cdp_url)
                     try:
                         page = browser.new_page()
-                        self.setup_page_routing(page)
-                        page.goto(url, timeout=timeout, wait_until="domcontentloaded")
-                        result = self._extract_deal_data(page, url)
-                        return result
+                        try:
+                            self.setup_page_routing(page)
+                            page.goto(url, timeout=timeout, wait_until="domcontentloaded")
+                            result = self._extract_deal_data(page, url)
+                            return result
+                        finally:
+                            page.close()
                     finally:
                         browser.close()
                 except Exception as e:
