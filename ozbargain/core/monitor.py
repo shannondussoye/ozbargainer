@@ -27,6 +27,10 @@ class LiveMonitor:
         self.last_scraped_times: dict = {}  # url -> datetime
         self._shutdown = False
 
+        # Initialize Telegram command listener
+        from ..notifier.telegram import TelegramListener
+        self.listener = TelegramListener(self.db, self.notifier)
+
         # Configuration from Pydantic Settings
         self.min_heat_score = settings.min_heat_score
         self.trending_check_interval = settings.trending_check_interval  # Minutes
@@ -43,6 +47,7 @@ class LiveMonitor:
         sig_name = signal.Signals(signum).name
         logger.info("Received %s. Shutting down gracefully...", sig_name, extra={"event_type": "shutdown"})
         self._shutdown = True
+        self.listener.stop()
 
     def process_deal(
         self, url: str, browser=None, event_data: Optional[Dict] = None, timeout: int = 30000
@@ -412,6 +417,7 @@ class LiveMonitor:
 
     def run(self) -> None:
         logger.info("Starting Live Monitor...", extra={"event_type": "startup"})
+        self.listener.start()
 
         while not self._shutdown:
             try:

@@ -78,6 +78,10 @@ class FastScraper:
             else:
                 title = "Unknown Deal"
 
+            # Check for bot wall
+            if title in BOT_WALL_TITLES:
+                return DealResult(error="Bot-wall block or empty page detected", url=url)
+
             # Description (Meta)
             description = ""
             meta_desc = soup.find("meta", property="og:description")
@@ -242,121 +246,121 @@ class BrowserScraper:
 
         with sync_playwright() as p:
             browser = p.chromium.launch(headless=self.headless)
-            page = browser.new_page()
-
-            logger.info("Loading profile: %s", base_user_url)
             try:
-                page.goto(base_user_url, timeout=60000, wait_until="domcontentloaded")
-                page.wait_for_selector("div.activities", timeout=15000)
-            except Exception as e:
-                logger.error("Error loading profile: %s", e)
-                browser.close()
-                return
+                page = browser.new_page()
 
-            last_height = page.evaluate("document.body.scrollHeight")
-            retries = 0
+                logger.info("Loading profile: %s", base_user_url)
+                try:
+                    page.goto(base_user_url, timeout=60000, wait_until="domcontentloaded")
+                    page.wait_for_selector("div.activities", timeout=15000)
+                except Exception as e:
+                    logger.error("Error loading profile: %s", e)
+                    return
 
-            while count < max_items:
-                # 1. Yield visible items
-                # We re-query all items because the list grows.
-                # Optimization: In heavy infinite scroll, scraping 1000 items from DOM repeatedly is slow.
-                # However, Playwright locator.all() is reasonably fast for 100s.
-                divs = page.locator("div.activities > div").all()
+                last_height = page.evaluate("document.body.scrollHeight")
+                retries = 0
 
-                for item in divs:
+                while count < max_items:
+                    # 1. Yield visible items
+                    # We re-query all items because the list grows.
+                    # Optimization: In heavy infinite scroll, scraping 1000 items from DOM repeatedly is slow.
+                    # However, Playwright locator.all() is reasonably fast for 100s.
+                    divs = page.locator("div.activities > div").all()
+
+                    for item in divs:
+                        if count >= max_items:
+                            break
+
+                        try:
+                            # Check structure
+                            if item.locator(".right .action").count() == 0:
+                                continue
+
+                            action_el = item.locator(".right .action")
+                            text = (action_el.text_content() or "").strip()
+
+                            # Filter types
+                            if not ("replied to" in text or "commented on" in text or "posted" in text):
+                                continue
+
+                            # Link
+                            links = action_el.locator("a").all()
+                            if not links:
+                                continue
+
+                            # Last link usually deal/comment
+                            href = links[-1].get_attribute("href")
+                            if not href:
+                                continue
+
+                            full_url = self.base_url + href if href.startswith("/") else href
+
+                            if full_url in items_seen:
+                                continue
+
+                            items_seen.add(full_url)
+                            count += 1
+
+                            yield {"text": text, "url": full_url}
+
+                        except Exception as item_e:
+                            logger.error("Error processing activity item: %s", item_e)
+                            continue
+
                     if count >= max_items:
                         break
 
+                    # 2. Scroll and Wait (Humanized & Slower)
                     try:
-                        # Check structure
-                        if item.locator(".right .action").count() == 0:
-                            continue
+                        self._human_scroll(page)
 
-                        action_el = item.locator(".right .action")
-                        text = (action_el.text_content() or "").strip()
+                        # Wait for load (Randomized & Slower)
+                        time.sleep(random.uniform(3.0, 6.0))
 
-                        # Filter types
-                        if not ("replied to" in text or "commented on" in text or "posted" in text):
-                            continue
+                        # Periodic Breather (every ~300 items)
+                        if count > 0 and (count // 300) > ((count - 10) // 300):
+                            logger.info("Taking a breather at ~%d items...", count)
+                            time.sleep(random.uniform(8.0, 15.0))
 
-                        # Link
-                        links = action_el.locator("a").all()
-                        if not links:
-                            continue
+                        new_height = page.evaluate("document.body.scrollHeight")
+                        if new_height == last_height:
+                            retries += 1
+                            logger.warning("No new items (Retry %d/10)...", retries)
 
-                        # Last link usually deal/comment
-                        href = links[-1].get_attribute("href")
-                        if not href:
-                            continue
+                            if retries > 3:
+                                # Aggressive Jiggle
+                                self._human_scroll(page, aggressive=True)
+                                time.sleep(2)
 
-                        full_url = self.base_url + href if href.startswith("/") else href
+                            # Fallback to check for button if really stuck
+                            if retries > 5:
+                                try:
+                                    # Look for ANY "next" or "load more" indicator
+                                    next_btn = page.locator("ul.pager li.pager-next a").first
+                                    if next_btn.is_visible():
+                                        logger.info("Found 'Next' button. Clicking...")
+                                        next_btn.click()
+                                        time.sleep(3)
+                                        retries = 0
+                                        last_height = page.evaluate("document.body.scrollHeight")
+                                        continue
+                                except Exception as next_e:
+                                    logger.debug("Error checking or clicking next button: %s", next_e)
 
-                        if full_url in items_seen:
-                            continue
+                            if retries >= 10:
+                                logger.info("End of feed reached.")
+                                break
+                        else:
+                            retries = 0
+                            last_height = new_height
 
-                        items_seen.add(full_url)
-                        count += 1
-
-                        yield {"text": text, "url": full_url}
-
-                    except Exception as item_e:
-                        logger.error("Error processing activity item: %s", item_e)
-                        continue
-
-                if count >= max_items:
-                    break
-
-                # 2. Scroll and Wait (Humanized & Slower)
-                try:
-                    self._human_scroll(page)
-
-                    # Wait for load (Randomized & Slower)
-                    time.sleep(random.uniform(3.0, 6.0))
-
-                    # Periodic Breather (every ~300 items)
-                    if count > 0 and (count // 300) > ((count - 10) // 300):
-                        logger.info("Taking a breather at ~%d items...", count)
-                        time.sleep(random.uniform(8.0, 15.0))
-
-                    new_height = page.evaluate("document.body.scrollHeight")
-                    if new_height == last_height:
-                        retries += 1
-                        logger.warning("No new items (Retry %d/10)...", retries)
-
-                        if retries > 3:
-                            # Aggressive Jiggle
-                            self._human_scroll(page, aggressive=True)
-                            time.sleep(2)
-
-                        # Fallback to check for button if really stuck
-                        if retries > 5:
-                            try:
-                                # Look for ANY "next" or "load more" indicator
-                                next_btn = page.locator("ul.pager li.pager-next a").first
-                                if next_btn.is_visible():
-                                    logger.info("Found 'Next' button. Clicking...")
-                                    next_btn.click()
-                                    time.sleep(3)
-                                    retries = 0
-                                    last_height = page.evaluate("document.body.scrollHeight")
-                                    continue
-                            except Exception as next_e:
-                                logger.debug("Error checking or clicking next button: %s", next_e)
-
-                        if retries >= 10:
-                            logger.info("End of feed reached.")
+                    except Exception as e:
+                        if "TargetClosed" in str(e) or "closed" in str(e):
+                            logger.warning("Browser window closed. Finalizing.")
                             break
-                    else:
-                        retries = 0
-                        last_height = new_height
-
-                except Exception as e:
-                    if "TargetClosed" in str(e) or "closed" in str(e):
-                        logger.warning("Browser window closed. Finalizing.")
-                        break
-                    logger.error("Error in user activity feed processing: %s", e)
-
-            browser.close()
+                        logger.error("Error in user activity feed processing: %s", e)
+            finally:
+                browser.close()
 
     def _human_scroll(self, page: Page, aggressive: bool = False):
         """
@@ -711,6 +715,8 @@ class BrowserScraper:
             try:
                 page.goto(url, timeout=timeout, wait_until="domcontentloaded")
                 return self._extract_deal_data(page, url)
+            except Exception as e:
+                return DealResult(error=str(e), url=url)
             finally:
                 page.close()
 
@@ -719,21 +725,26 @@ class BrowserScraper:
                 logger.info("Connecting to Chrome via CDP: %s", self.cdp_url)
                 try:
                     browser = p.chromium.connect_over_cdp(self.cdp_url)
-                    page = browser.new_page()
-                    self.setup_page_routing(page)
-                    page.goto(url, timeout=timeout, wait_until="domcontentloaded")
-                    result = self._extract_deal_data(page, url)
-                    browser.close()
-                    return result
+                    try:
+                        page = browser.new_page()
+                        self.setup_page_routing(page)
+                        page.goto(url, timeout=timeout, wait_until="domcontentloaded")
+                        result = self._extract_deal_data(page, url)
+                        return result
+                    finally:
+                        browser.close()
                 except Exception as e:
                     return DealResult(error=f"CDP Connection failed: {str(e)}", url=url)
             else:
-                browser = p.chromium.launch(headless=self.headless)
-                page = browser.new_page()
-                self.setup_page_routing(page)
-                page.goto(url, timeout=timeout, wait_until="domcontentloaded")
-
-                result = self._extract_deal_data(page, url)
-
-                browser.close()
-                return result
+                try:
+                    browser = p.chromium.launch(headless=self.headless)
+                    try:
+                        page = browser.new_page()
+                        self.setup_page_routing(page)
+                        page.goto(url, timeout=timeout, wait_until="domcontentloaded")
+                        result = self._extract_deal_data(page, url)
+                        return result
+                    finally:
+                        browser.close()
+                except Exception as e:
+                    return DealResult(error=str(e), url=url)

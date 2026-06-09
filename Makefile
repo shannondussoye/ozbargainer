@@ -38,6 +38,9 @@ backup: ## Trigger database backup
 test: ## Run tests within a temporary container
 	docker compose run --rm monitor pytest tests/ -v
 
+test-host: ## Run tests natively on the host via uv
+	uv run pytest tests/ -v
+
 shell: ## Open shell in the running monitor container
 	docker compose exec monitor bash
 
