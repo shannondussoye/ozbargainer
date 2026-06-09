@@ -189,6 +189,7 @@ def test_browser_scraper_timeout_error_handling(mocker):
     )
 
     scraper = BrowserScraper(headless=True, cdp_url=None)
+    scraper.cdp_url = None
     result = scraper.scrape_deal_page("https://www.ozbargain.com.au/node/123456")
 
     # Assertions
