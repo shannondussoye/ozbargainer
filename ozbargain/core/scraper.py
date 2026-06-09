@@ -1,5 +1,6 @@
 import re
 import requests
+import json
 from datetime import datetime, timezone
 from zoneinfo import ZoneInfo
 import random
@@ -143,11 +144,29 @@ class FastScraper:
             # Expired?
             is_expired = soup.find(class_="expired") is not None or soup.select_one(".node-expired") is not None
 
+            # Comment Count (from LD+JSON)
+            comment_count = 0
+            for script in soup.find_all("script", type="application/ld+json"):
+                try:
+                    data = json.loads(script.string or "")
+                    if isinstance(data, list):
+                        for item in data:
+                            if isinstance(item, dict) and "commentCount" in item:
+                                comment_count = int(item["commentCount"])
+                                break
+                    elif isinstance(data, dict):
+                        if "commentCount" in data:
+                            comment_count = int(data["commentCount"])
+                            break
+                except Exception:
+                    pass
+
             return DealResult(
                 id=deal_id,
                 url=r.url,
                 title=title,
                 description=description,
+                comment_count=comment_count,
                 coupon_code=coupon,
                 tags=tags,
                 is_expired=is_expired,
@@ -174,6 +193,47 @@ class BrowserScraper:
         self.headless = headless
         self.cdp_url = cdp_url or settings.chrome_cdp_url
         self.base_url = settings.ozbargain_base_url
+
+    def setup_page_routing(self, page: Page) -> None:
+        """
+        Configure request interception to block images, fonts, media, and third-party ad/tracking domains.
+        This significantly reduces memory footprint, CPU load, and loading time.
+        """
+        def route_handler(route):
+            req = route.request
+            url_lower = req.url.lower()
+
+            # Block media/fonts
+            if req.resource_type in ("image", "font", "media"):
+                try:
+                    route.abort()
+                except Exception:
+                    pass
+                return
+
+            # Block third-party ad and tracking domains
+            blocked_patterns = [
+                "googleads", "googlesyndication", "doubleclick",
+                "taboola", "analytics", "facebook", "twitter",
+                "amazon-adsystem", "scorecardresearch", "adnxs",
+                "pubmatic", "rubiconproject", "openx", "adroll"
+            ]
+            if any(pattern in url_lower for pattern in blocked_patterns):
+                try:
+                    route.abort()
+                except Exception:
+                    pass
+                return
+
+            try:
+                route.continue_()
+            except Exception:
+                pass
+
+        try:
+            page.route("**/*", route_handler)
+        except Exception as e:
+            logger.debug("Failed to set page routing: %s", e)
 
     def get_user_activity(self, user_id: str, max_items: int = 50):
         """
@@ -339,6 +399,26 @@ class BrowserScraper:
         """
         Determines the total comment count, handling pagination if necessary.
         """
+        # 1. Parse structured LD+JSON data (Fastest & Most Reliable)
+        try:
+            scripts = page.locator('script[type="application/ld+json"]').all_inner_texts()
+            for content in scripts:
+                if not content.strip():
+                    continue
+                try:
+                    data = json.loads(content)
+                    if isinstance(data, list):
+                        for item in data:
+                            if isinstance(item, dict) and "commentCount" in item:
+                                return int(item["commentCount"])
+                    elif isinstance(data, dict):
+                        if "commentCount" in data:
+                            return int(data["commentCount"])
+                except Exception as json_e:
+                    logger.debug("Failed to parse individual LD+JSON block: %s", json_e)
+        except Exception as e:
+            logger.debug("Failed to retrieve LD+JSON scripts: %s", e)
+
         comment_count = 0
         has_counted_via_dom = False
 
@@ -376,7 +456,7 @@ class BrowserScraper:
 
                 # Navigate to last page
                 page.goto(target_url, wait_until="domcontentloaded")
-                page.wait_for_selector("div.comment", timeout=5000)
+                page.wait_for_selector("div.comment", timeout=5000, state="attached")
 
                 remainder = page.locator("div.comment").count()
                 comment_count = base_count + remainder
@@ -631,6 +711,7 @@ class BrowserScraper:
             # Reuse active context (which shares cookies/session state) if available
             context = browser.contexts[0] if hasattr(browser, "contexts") and browser.contexts else browser
             page = context.new_page()
+            self.setup_page_routing(page)
             try:
                 page.goto(url, timeout=timeout, wait_until="domcontentloaded")
                 return self._extract_deal_data(page, url)
@@ -646,6 +727,7 @@ class BrowserScraper:
                     browser = p.chromium.connect_over_cdp(self.cdp_url)
                     try:
                         page = browser.new_page()
+                        self.setup_page_routing(page)
                         page.goto(url, timeout=timeout, wait_until="domcontentloaded")
                         result = self._extract_deal_data(page, url)
                         return result
@@ -658,6 +740,7 @@ class BrowserScraper:
                     browser = p.chromium.launch(headless=self.headless)
                     try:
                         page = browser.new_page()
+                        self.setup_page_routing(page)
                         page.goto(url, timeout=timeout, wait_until="domcontentloaded")
                         result = self._extract_deal_data(page, url)
                         return result
