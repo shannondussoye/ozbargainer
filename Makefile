@@ -1,7 +1,7 @@
 # OzBargainer Orchestration
 # Alignment: §4.2, §4.9, §4.10
 
-.PHONY: help start stop restart logs status backup test shell
+.PHONY: help start stop restart logs status backup test shell secure-env
 
 # Default target: help
 help: ## Show this help message
@@ -34,6 +34,9 @@ status: ## Show status of bridge and container
 
 backup: ## Trigger database backup
 	./scripts/backup_db.sh
+
+secure-env: ## Restrict .env to owner read/write only (chmod 600)
+	@if [ -f .env ]; then chmod 600 .env && echo ".env is now 600"; else echo "no .env file"; fi
 
 test: ## Run tests within a temporary container
 	docker compose run --rm monitor pytest tests/ -v
