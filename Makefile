@@ -42,6 +42,10 @@ status: ## Show status of bridge and container
 backup: ## Trigger database backup
 	./scripts/backup_db.sh
 
+.PHONY: secure-env
+secure-env: ## Restrict .env to owner read/write only (chmod 600)
+	@if [ -f .env ]; then chmod 600 .env && echo ".env is now 600"; else echo "no .env file"; fi
+
 test: ## Run tests within a temporary container
 	docker compose run --rm monitor pytest tests/ -v
 
