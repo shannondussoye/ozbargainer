@@ -1,0 +1,16 @@
+[Unit]
+Description=OzBargain host Chrome CDP bridge (127.0.0.1:9228)
+Documentation=https://github.com/shannondussoye/ozbargainer
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+WorkingDirectory=%h/workspace/ozbargain
+ExecStart=%h/workspace/ozbargain/scripts/bridge.sh start
+ExecStop=%h/workspace/ozbargain/scripts/bridge.sh stop
+TimeoutStartSec=60
+
+[Install]
+WantedBy=default.target

@@ -1,7 +1,7 @@
 # OzBargainer Orchestration
 # Alignment: §4.2, §4.9, §4.10
 
-.PHONY: help start stop restart logs status backup test shell
+.PHONY: help start stop restart logs status install-bridge-service backup test shell
 
 # Default target: help
 help: ## Show this help message
@@ -10,6 +10,13 @@ help: ## Show this help message
 start: ## Start host bridge and docker container
 	@./scripts/bridge.sh start
 	@docker compose up -d
+
+install-bridge-service: ## Install + enable the host Chrome bridge as a systemd user service
+	@mkdir -p $(HOME)/.config/systemd/user
+	@cp deploy/ozbargain-bridge.service $(HOME)/.config/systemd/user/
+	@systemctl --user daemon-reload
+	@systemctl --user enable --now ozbargain-bridge.service
+	@echo "Bridge service installed. To keep it running without an active login: sudo loginctl enable-linger $(USER)"
 
 stop: ## Stop docker container and host bridge
 	@docker compose down

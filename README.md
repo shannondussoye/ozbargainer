@@ -92,11 +92,26 @@ HEALTHCHECK_PING_URL="https://hc-ping.com/uuid" # Heartbeat URL
 ### Docker Deployment (Recommended)
 
 #### 1. Hybrid Bridge (Stealth Mode)
-Runs Google Chrome on the host machine to easily complete Cloudflare Turnstile challenges while containerizing the monitor.
+Runs Google Chrome on the host machine to complete Cloudflare Turnstile challenges while the monitor runs in Docker. The bridge listens on `127.0.0.1:9228` and the container connects via `CHROME_CDP_URL`.
 ```bash
-# Starts the host browser and monitor container
+# Starts the host browser and monitor container (one-off)
 make start
 ```
+
+**Start the bridge at boot (systemd user service):**
+```bash
+make install-bridge-service
+# Keep it running without an active login session:
+sudo loginctl enable-linger "$USER"
+```
+
+**Check what is actually in use:**
+```bash
+make status                # bridge + container
+./scripts/bridge.sh status # bridge only
+```
+
+> **Fallback behaviour:** if `CHROME_CDP_URL` is set but nothing is listening on that port, the monitor logs a warning at startup and falls back to the Chromium bundled in the container. It keeps working, but it is **not** using the stealth host bridge. The active mode is logged on startup as `Browser mode: ...`.
 
 #### 2. Standard Deployment
 Runs the monitor inside Docker standalone.

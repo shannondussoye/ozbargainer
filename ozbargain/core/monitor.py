@@ -2,10 +2,12 @@ import signal
 import time
 import re
 import random
+import socket
 import requests
 from contextlib import contextmanager
 from datetime import datetime, timedelta, timezone
 from typing import Dict, Optional, Tuple
+from urllib.parse import urlparse
 from playwright.sync_api import sync_playwright, Page
 from .scraper import BrowserScraper, BOT_WALL_TITLES
 from ..db.manager import StorageManager
@@ -17,12 +19,39 @@ from ..utils.logger import setup_logger
 logger = setup_logger("monitor")
 
 
+def _cdp_reachable(cdp_url: str, timeout: float = 1.5) -> bool:
+    """Best-effort TCP probe for the host Chrome bridge (cheap, no Playwright)."""
+    parsed = urlparse(cdp_url)
+    host = parsed.hostname or "127.0.0.1"
+    port = parsed.port or (443 if parsed.scheme == "https" else 80)
+    try:
+        with socket.create_connection((host, port), timeout=timeout):
+            return True
+    except OSError:
+        return False
+
+
 class LiveMonitor:
     def __init__(self) -> None:
         self.db = StorageManager()
         self.cdp_url = settings.chrome_cdp_url
         self.scraper = BrowserScraper(headless=True, cdp_url=self.cdp_url)
         self.notifier = TelegramNotifier()
+
+        # Make the active browser mode explicit at startup. Previously a downed
+        # host bridge silently fell back to the bundled browser, so it was easy
+        # to believe the stealth bridge was in use when it was not.
+        if self.cdp_url:
+            if _cdp_reachable(self.cdp_url):
+                logger.info("Browser mode: CDP host bridge at %s", self.cdp_url)
+            else:
+                logger.warning(
+                    "Browser mode: CHROME_CDP_URL=%s is unreachable; falling back to bundled headless "
+                    "Chromium. Start the bridge with './scripts/bridge.sh start' (see README).",
+                    self.cdp_url,
+                )
+        else:
+            logger.info("Browser mode: bundled headless Chromium (no CHROME_CDP_URL set)")
         self.seen_rows: set = set()  # Cache to avoid re-processing simple rows in same session
         self.last_scraped_times: dict = {}  # url -> datetime
         self._shutdown = False
@@ -319,7 +348,12 @@ class LiveMonitor:
                 try:
                     browser = p.chromium.connect_over_cdp(self.cdp_url)
                 except Exception as cdp_e:
-                    logger.warning("CDP Connection failed: %s. Falling back to local browser.", cdp_e)
+                    logger.warning(
+                        "CDP bridge unreachable at %s (%s); using bundled headless Chromium. "
+                        "Run './scripts/bridge.sh start' to use the host bridge.",
+                        self.cdp_url,
+                        cdp_e,
+                    )
                     browser = p.chromium.launch(headless=True)
             else:
                 logger.info("Launching local browser...")
