@@ -19,13 +19,12 @@ jobs:
           enable-cache: true
           python-version: '3.12'
 
-      # `uv pip sync` requires a target environment. Create a venv and install
-      # exactly the pinned dependencies from requirements.lock, then invoke the
-      # tools directly from that venv. Using `uv run` here would instead resolve
-      # the unpinned deps declared in pyproject.toml and ignore the lock file.
-      - name: Create venv and sync locked dependencies
+      # setup-uv creates a .venv and exports VIRTUAL_ENV, so `uv pip sync`
+      # installs the pinned requirements.lock into it. Invoke the tools from
+      # that venv directly so the locked versions are used — `uv run` would
+      # additionally resolve pyproject.toml's unpinned dependencies.
+      - name: Sync locked dependencies
         run: |
-          uv venv
           uv pip sync requirements.lock
 
       - name: Install Playwright Browsers
