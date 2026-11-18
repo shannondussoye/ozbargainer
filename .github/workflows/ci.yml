@@ -8,7 +8,9 @@ on:
 
 jobs:
   lint-and-test:
-    runs-on: ubuntu-latest
+    # Pinned: the locked playwright (1.59.x) does not yet support ubuntu 26.04
+    # (ubuntu-latest). Pinning keeps requirements.lock authoritative.
+    runs-on: ubuntu-24.04
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
