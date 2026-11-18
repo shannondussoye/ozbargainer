@@ -19,22 +19,27 @@ jobs:
           enable-cache: true
           python-version: '3.12'
 
-      - name: Sync dependencies
+      # `uv pip sync` requires a target environment. Create a venv and install
+      # exactly the pinned dependencies from requirements.lock, then invoke the
+      # tools directly from that venv. Using `uv run` here would instead resolve
+      # the unpinned deps declared in pyproject.toml and ignore the lock file.
+      - name: Create venv and sync locked dependencies
         run: |
+          uv venv
           uv pip sync requirements.lock
 
       - name: Install Playwright Browsers
         run: |
-          uv run playwright install chromium
+          .venv/bin/playwright install chromium
 
       - name: Run Ruff Linter
         run: |
-          uv run ruff check .
+          .venv/bin/ruff check .
 
       - name: Run Mypy Type Checker
         run: |
-          uv run mypy ozbargain/
+          .venv/bin/mypy ozbargain/
 
       - name: Run Tests
         run: |
-          uv run pytest
+          .venv/bin/pytest
