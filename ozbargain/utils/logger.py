@@ -7,6 +7,11 @@ from pythonjsonlogger import jsonlogger
 SESSION_ID = str(uuid.uuid4())[:8]
 
 
+def _file_logging_enabled() -> bool:
+    """Allow tests / CI to disable file logging so they never touch production logs."""
+    return os.environ.get("OZBARGAIN_DISABLE_FILE_LOG", "").lower() not in ("1", "true", "yes", "on")
+
+
 class SessionContextFilter(logging.Filter):
     def filter(self, record):
         record.session_id = SESSION_ID
@@ -34,19 +39,21 @@ def setup_logger(name: str = "ozbargain"):
     stdout_handler.setFormatter(stdout_formatter)
     logger.addHandler(stdout_handler)
 
-    # 2. File Handler (JSON)
-    log_dir = "logs"
-    if not os.path.exists(log_dir):
-        os.makedirs(log_dir)
+    # 2. File Handler (JSON) — skipped when disabled (e.g. under pytest) so
+    # tests never write to the production logs/monitor.log.
+    if _file_logging_enabled():
+        log_dir = os.environ.get("OZBARGAIN_LOG_DIR", "logs")
+        if not os.path.exists(log_dir):
+            os.makedirs(log_dir)
 
-    log_file = os.path.join(log_dir, "monitor.log")
-    file_handler = logging.FileHandler(log_file)
-    file_handler.setLevel(logging.INFO)
+        log_file = os.path.join(log_dir, "monitor.log")
+        file_handler = logging.FileHandler(log_file)
+        file_handler.setLevel(logging.INFO)
 
-    # JSON Formatter
-    json_formatter = jsonlogger.JsonFormatter("%(timestamp)s %(levelname)s %(name)s %(message)s", timestamp=True)
-    file_handler.setFormatter(json_formatter)
-    logger.addHandler(file_handler)
+        # JSON Formatter
+        json_formatter = jsonlogger.JsonFormatter("%(timestamp)s %(levelname)s %(name)s %(message)s", timestamp=True)
+        file_handler.setFormatter(json_formatter)
+        logger.addHandler(file_handler)
 
     # 3. Logtail Handler (Optional)
     from ..config import settings
